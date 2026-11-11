@@ -76,6 +76,7 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
   begin: () => void; end: () => void; grow: () => void
 }) {
   const [outputs, setOutputs] = useState<Device[]>([])
+  const [outputAccess, setOutputAccess] = useState<'idle' | 'requesting' | 'granted'>('idle')
   const [message, setMessage] = useState('')
   const midiReady = engine.midiEnabled
   const rangeGesture = useRef(false)
@@ -88,6 +89,23 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
       setMessage('')
     } catch {
       setMessage('Не удалось получить список аудиоустройств.')
+    }
+  }
+
+  async function revealOutputs() {
+    setOutputAccess('requesting')
+    setMessage('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      for (const track of stream.getTracks()) track.stop()
+      setOutputAccess('granted')
+      await refreshOutputs()
+    } catch (error) {
+      setOutputAccess('idle')
+      const denied = error instanceof DOMException && error.name === 'NotAllowedError'
+      setMessage(denied
+        ? 'Chrome не дал доступ к микрофону. Разрешение можно изменить в настройках сайта.'
+        : 'Chrome не смог открыть микрофон для получения списка выходов.')
     }
   }
 
@@ -155,7 +173,14 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
       <DeviceSelect label="Аудиоустройство" value={String(node.params.device)} defaultLabel="Системный выход" devices={outputs}
         onChange={value => setParam('device', value)} />
       {(!supportsOutputSelection() || !navigator.mediaDevices) && <p className="help">Доступен системный выход. Выбор устройства браузером не поддерживается.</p>}
-      {supportsOutputSelection() && navigator.mediaDevices && <button onClick={refreshOutputs}>Обновить список устройств</button>}
+      {supportsOutputSelection() && navigator.mediaDevices && <>
+        {outputAccess !== 'granted' && <>
+          <p className="help">Для полного списка выходов Chrome может запросить доступ к микрофону. Приложение сразу отключит микрофон после получения разрешения.</p>
+          <button onClick={revealOutputs} disabled={outputAccess === 'requesting'}>Показать другие выходы</button>
+        </>}
+        {outputAccess === 'granted' && !outputs.length && <p className="help">Chrome показывает только системный выход.</p>}
+        <button onClick={refreshOutputs}>Обновить список устройств</button>
+      </>}
     </>}
     {(node.kind === 'mix' || node.kind === 'split') && <>
       {ports(node, node.kind === 'mix' ? 'in' : 'out').map(port => slider(port.id, (node.kind === 'mix' ? 'Вход ' : 'Выход ') + (port.index + 1)))}
