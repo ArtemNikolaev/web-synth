@@ -2,7 +2,7 @@ import { canConnect, createProject, kinds, modules, signalAt, uid, waves, type K
 
 export const ranges: Record<string, [number, number, number]> = {
   gain: [0, 2, 0.01],
-  frequency: [20, 12000, 1],
+  frequency: [20, 12000, 0.01],
   voices: [1, 32, 1],
   attack: [0.001, 2, 0.001],
   release: [0.01, 5, 0.01],

@@ -1,11 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { Handle, Position, useConnection, useUpdateNodeInternals, type Node, type NodeProps } from '@xyflow/react'
 import { supportsOutputSelection, type AudioEngine } from './audio.ts'
-import { modules, numeric, ports, waves, type Module, type WindowState } from './model.ts'
+import { modules, noteFrequency, numeric, ports, waves, type Module, type WindowState } from './model.ts'
 import { ranges } from './storage.ts'
 
 export type RackNode = Node<{ module: Module }, 'rack'>
 export const nodeTypes = { rack: RackModule }
+
+const noteNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B']
+const oscillatorPresets = Array.from({ length: 24 }, (_, index) => ({
+  name: noteNames[index % 12] + (2 + Math.floor(index / 12)),
+  frequency: Number(noteFrequency(36 + index).toFixed(2)),
+}))
 
 function describe(node: Module) {
   switch (node.kind) {
@@ -55,6 +61,33 @@ function RackModule({ id, data, selected }: NodeProps<RackNode>) {
 }
 
 type Device = { id: string; name: string }
+
+function NumberField({ label, unit, value, min, max, step, change }: {
+  label: string; unit: string; value: number; min: number; max: number; step: number; change: (value: number) => void
+}) {
+  const [draft, setDraft] = useState<string>()
+  return <input type="number" aria-label={label + unit} min={min} max={max} step={step} value={draft ?? value}
+    onChange={event => setDraft(event.currentTarget.value)}
+    onBlur={event => {
+      const entered = event.currentTarget.valueAsNumber
+      setDraft(undefined)
+      if (draft === undefined || !Number.isFinite(entered)) return
+      const bounded = Math.max(min, Math.min(max, entered))
+      const precision = String(step).split('.')[1]?.length ?? 0
+      const normalized = Number((min + Math.round((bounded - min) / step) * step).toFixed(precision))
+      if (normalized !== value) change(normalized)
+    }}
+    onKeyDown={event => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        event.currentTarget.blur()
+      }
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setDraft(undefined)
+      }
+    }} />
+}
 
 function DeviceSelect({ label, value, defaultLabel, devices, onChange }: {
   label: string; value: string; defaultLabel: string; devices: Device[]; onChange: (value: string) => void
@@ -135,15 +168,18 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
       end()
     }
     return (
-      <label className="range field" key={key}>
-        <span>{label}<output>{value}{unit}</output></span>
-        <input type="range" min={min} max={max} step={step} value={value} onPointerDown={event => {
+      <div className="range field" key={key}>
+        <label className="range-value">
+          {label}{unit && <span className="unit">, {unit.trim()}</span>}
+          <NumberField label={label} unit={unit} value={value} min={min} max={max} step={step} change={next => setParam(key, next)} />
+        </label>
+        <input type="range" aria-label={label + ' — ползунок'} min={min} max={max} step={step} value={value} onPointerDown={event => {
           event.currentTarget.setPointerCapture(event.pointerId)
           rangeGesture.current = true
           begin()
         }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
           onChange={event => setParam(key, event.currentTarget.valueAsNumber, rangeGesture.current)} />
-      </label>
+      </div>
     )
   }
 
@@ -153,7 +189,16 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
         {waves.map(wave => <option key={wave}>{wave}</option>)}
       </select></label>
     )}
-    {node.kind === 'osc' && slider('frequency', 'Частота', ' Гц')}
+    {node.kind === 'osc' && <>
+      <label className="field"><span>Нота</span>
+        <select aria-label="Нота" value={oscillatorPresets.find(preset => preset.frequency === node.params.frequency)?.frequency ?? ''}
+          onChange={event => setParam('frequency', Number(event.target.value))}>
+          <option value="" disabled>Произвольная частота</option>
+          {oscillatorPresets.map(preset => <option key={preset.name} value={preset.frequency}>{preset.name} · {preset.frequency} Гц</option>)}
+        </select>
+      </label>
+      {slider('frequency', 'Частота', ' Гц')}
+    </>}
     {node.kind === 'synth' && <>
       {slider('voices', 'Голосов')}
       {slider('attack', 'Атака', ' с')}

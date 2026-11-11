@@ -4,6 +4,7 @@ export type Signal = 'audio' | 'midi'
 export type Point = { x: number; y: number }
 export type WindowState = Point & { width: number; height: number; minimized: boolean }
 export const waves = ['sine', 'square', 'sawtooth', 'triangle'] as const
+export const noteFrequency = (note: number) => 440 * 2 ** ((note - 69) / 12)
 export const modules = {
   osc: { title: 'Oscillator', inputs: [], outputs: ['audio'], params: { wave: 'sine', frequency: 110, gain: 0.18 } },
   midi: { title: 'MIDI Input', inputs: [], outputs: ['midi'], params: { device: '', channel: 0 } },

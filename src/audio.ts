@@ -1,4 +1,4 @@
-import { numeric, ports, signalAt, type Module, type Patch, type Wire } from './model.ts'
+import { noteFrequency, numeric, ports, signalAt, type Module, type Patch, type Wire } from './model.ts'
 
 type SinkElement = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
 type Voice = { note: number; channel: number; oscillator: OscillatorNode; level: GainNode; start: number; attack: number; peak: number; released: boolean }
@@ -315,7 +315,7 @@ export class AudioEngine {
     const oscillator = ctx.createOscillator()
     const level = ctx.createGain()
     oscillator.type = node.params.wave as OscillatorType
-    oscillator.frequency.value = 440 * 2 ** ((note - 69) / 12)
+    oscillator.frequency.value = noteFrequency(note)
     oscillator.connect(level)
     level.connect(runtime.bus)
     const peak = velocity / 127 / Math.sqrt(numeric(node, 'voices'))

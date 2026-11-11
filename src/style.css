@@ -139,9 +139,11 @@ button.add { width: 45px; height: 45px; padding: 0; font-size: 28px; font-weight
 .resize-grip { width: 15px; height: 15px; right: 0; bottom: 0; position: absolute; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 58%, #829ab4 60%, #829ab4 66%, transparent 68%, transparent 77%, #829ab4 79%, #829ab4 85%, transparent 87%); }
 .field { display: grid; gap: 6px; margin-bottom: 14px; font-size: 13px; }
 .field span { display: flex; justify-content: space-between; }
-.field output, .help { color: #bed3e9; font-variant-numeric: tabular-nums; }
+.unit, .help { color: #bed3e9; }
 .field select, .field input:not([type=range]) { width: 100%; color: inherit; background: var(--field); border: 1px solid #56708e; border-radius: 6px; padding: 8px; }
-.range input { margin: 0; width: 100%; accent-color: #82d5fc; }
+.range-value { display: flex; align-items: center; }
+.range-value input[type=number] { width: 92px; margin-left: auto; padding: 5px 6px; font-variant-numeric: tabular-nums; }
+.range input[type=range] { margin: 0; width: 100%; accent-color: #82d5fc; }
 .help { font-size: 12px; line-height: 1.45; margin: 10px 0; }
 .window-body > button { margin-bottom: 10px; }
 
