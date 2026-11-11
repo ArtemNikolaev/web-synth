@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { canConnect, connect, createProject, duplicate, emptyPatch, makeModule, remove, type Module } from '../src/model.ts'
+import { canConnect, connect, createProject, duplicate, emptyPatch, makeModule, oscillatorLayers, remove, setOscillatorLayers, type Module } from '../src/model.ts'
 import { importProject } from '../src/storage.ts'
 
 const node = (kind: Module['kind']) => makeModule(kind, { x: 0, y: 0 })
@@ -64,5 +64,19 @@ test('project JSON round-trips working state and named versions and rejects inva
   assert.deepEqual(imported.patch, project.patch)
   assert.deepEqual(imported.versions, project.versions)
   project.patch.wires[0].targetHandle = 'in-999'
+  assert.throws(() => importProject(JSON.stringify(project)))
+})
+
+test('oscillator layers preserve legacy settings and round-trip independently', () => {
+  const legacy = { ...node('osc'), oscillators: undefined, params: { frequency: 220, wave: 'triangle', gain: 0.4 } }
+  const [first] = oscillatorLayers(legacy)
+  assert.deepEqual(first, { id: 'main', wave: 'triangle', gain: 0.4, enabled: true })
+
+  const project = createProject('Layers')
+  const layered = setOscillatorLayers(legacy, [first, { id: 'second', wave: 'square', gain: 0.2, enabled: false }])
+  project.patch.modules = [layered]
+  assert.deepEqual(importProject(JSON.stringify(project)).patch.modules, [layered])
+  const malformed = setOscillatorLayers(legacy, [first, { ...first, wave: 'square' }])
+  project.patch.modules = [malformed]
   assert.throws(() => importProject(JSON.stringify(project)))
 })

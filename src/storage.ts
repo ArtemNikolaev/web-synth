@@ -72,6 +72,16 @@ function validPatch(value: unknown): value is Patch {
       !finite(node.count) || !Number.isInteger(node.count) || node.count < 2 ||
       !object(node.params) || (node.auto !== undefined && (node.auto !== true || (node.kind !== 'mix' && node.kind !== 'split')))) return false
     ids.add(node.id)
+    if (node.oscillators !== undefined) {
+      if (node.kind !== 'osc' || !Array.isArray(node.oscillators) || !node.oscillators.length) return false
+      const layerIds = new Set<string>()
+      for (const layer of node.oscillators) {
+        if (!object(layer) || !identifier(layer.id) || layerIds.has(layer.id) ||
+          !waves.includes(layer.wave as typeof waves[number]) || !finite(layer.gain) ||
+          layer.gain < ranges.gain[0] || layer.gain > ranges.gain[1] || typeof layer.enabled !== 'boolean') return false
+        layerIds.add(layer.id)
+      }
+    }
     const kind = node.kind as Kind
     const defaults = modules[kind].params
     if (Object.keys(defaults).some(key => !Object.hasOwn(node.params as object, key))) return false

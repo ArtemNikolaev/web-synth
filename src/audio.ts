@@ -1,12 +1,13 @@
-import { noteFrequency, numeric, ports, signalAt, type Module, type Patch, type Wire } from './model.ts'
+import { noteFrequency, numeric, oscillatorLayers, ports, signalAt, type Module, type Patch, type Wire } from './model.ts'
 
 type SinkElement = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
 type Voice = { note: number; channel: number; oscillator: OscillatorNode; level: GainNode; start: number; attack: number; peak: number; released: boolean }
+type Generator = { oscillator: OscillatorNode; level: GainNode }
 type Runtime = {
   inputs: Map<string, GainNode>
   outputs: Map<string, GainNode>
   bus: GainNode
-  oscillator?: OscillatorNode
+  oscillators?: Map<string, Generator>
   voices: Set<Voice>
   defaultRoute?: GainNode
   stream?: MediaStreamAudioDestinationNode
@@ -77,15 +78,8 @@ export class AudioEngine {
   private makeRuntime(node: Module): Runtime {
     const ctx = this.context!
     const runtime: Runtime = { inputs: new Map(), outputs: new Map(), bus: ctx.createGain(), voices: new Set() }
-    runtime.bus.gain.value = numeric(node, 'gain')
-    if (node.kind === 'osc') {
-      const osc = ctx.createOscillator()
-      osc.type = node.params.wave as OscillatorType
-      osc.frequency.value = numeric(node, 'frequency')
-      osc.connect(runtime.bus)
-      osc.start()
-      runtime.oscillator = osc
-    }
+    runtime.bus.gain.value = node.kind === 'osc' ? 1 : numeric(node, 'gain')
+    if (node.kind === 'osc') runtime.oscillators = new Map()
     if (node.kind === 'out') {
       runtime.defaultRoute = ctx.createGain()
       runtime.bus.connect(runtime.defaultRoute)
@@ -96,11 +90,8 @@ export class AudioEngine {
 
   private apply(node: Module, runtime: Runtime) {
     const ctx = this.context!
-    this.ramp(runtime.bus.gain, numeric(node, 'gain'))
-    if (runtime.oscillator) {
-      runtime.oscillator.type = node.params.wave as OscillatorType
-      this.ramp(runtime.oscillator.frequency, numeric(node, 'frequency'))
-    }
+    if (runtime.oscillators) this.applyOscillators(node, runtime, runtime.oscillators)
+    else this.ramp(runtime.bus.gain, numeric(node, 'gain'))
     if (node.kind === 'synth') {
       const held = [...runtime.voices].filter(voice => !voice.released)
       for (const voice of held.slice(0, Math.max(0, held.length - numeric(node, 'voices')))) this.release(voice, 0.025)
@@ -129,6 +120,42 @@ export class AudioEngine {
     }
 
     if (node.kind === 'out' && runtime.device !== node.params.device) this.routeOutput(node, runtime)
+  }
+
+  private applyOscillators(node: Module, runtime: Runtime, generators: Map<string, Generator>) {
+    const ctx = this.context!
+    const active = oscillatorLayers(node).filter(layer => layer.enabled)
+    const ids = new Set(active.map(layer => layer.id))
+    for (const [id, generator] of generators) {
+      if (ids.has(id)) continue
+      this.ramp(generator.level.gain, 0)
+      generator.oscillator.stop(ctx.currentTime + 0.05)
+      generators.delete(id)
+    }
+
+    const frequency = numeric(node, 'frequency')
+    for (const layer of active) {
+      let generator = generators.get(layer.id)
+      if (!generator) {
+        const oscillator = ctx.createOscillator()
+        const level = ctx.createGain()
+        oscillator.frequency.value = frequency
+        oscillator.type = layer.wave
+        level.gain.value = 0
+        oscillator.connect(level)
+        level.connect(runtime.bus)
+        oscillator.onended = () => {
+          oscillator.disconnect()
+          level.disconnect()
+        }
+        oscillator.start()
+        generator = { oscillator, level }
+        generators.set(layer.id, generator)
+      }
+      generator.oscillator.type = layer.wave
+      this.ramp(generator.oscillator.frequency, frequency)
+      this.ramp(generator.level.gain, layer.gain)
+    }
   }
 
   private routeOutput(node: Module, runtime: Runtime) {
@@ -231,7 +258,7 @@ export class AudioEngine {
       runtime.request = undefined
       this.ramp(runtime.bus.gain, 0)
       setTimeout(() => {
-        runtime.oscillator?.stop()
+        for (const generator of runtime.oscillators?.values() ?? []) generator.oscillator.stop()
         for (const voice of runtime.voices) voice.oscillator.stop()
         this.disposeOutput(runtime)
         runtime.bus.disconnect()
@@ -245,7 +272,7 @@ export class AudioEngine {
       const runtime = existing ?? this.makeRuntime(node)
       this.runtimes.set(node.id, runtime)
       const before = previous?.modules.find(item => item.id === node.id)
-      if (!existing || before?.params !== node.params || before.count !== node.count) this.apply(node, runtime)
+      if (!existing || before?.params !== node.params || before.oscillators !== node.oscillators || before.count !== node.count) this.apply(node, runtime)
     }
 
     for (const edge of next.wires) {

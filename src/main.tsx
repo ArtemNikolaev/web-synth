@@ -8,7 +8,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import './style.css'
 import {
-  canConnect, connect, createProject, duplicate, makeModule, modules, remove, signalAt, uid,
+  canConnect, connect, createProject, duplicate, makeModule, modules, oscillatorLayers, remove, setOscillatorLayers, signalAt, uid,
   type Kind, type WindowState, type Wire,
 } from './model.ts'
 import { exportProject, importProject } from './storage.ts'
@@ -221,8 +221,9 @@ function Rack() {
   function openWindow(id: string) {
     const existing = patch?.windows[id]
     const offset = (Object.keys(patch?.windows ?? {}).length % 7) * 26
+    const height = patch?.modules.find(node => node.id === id)?.kind === 'osc' ? 430 : 336
     changeWindow(id, existing ? { ...existing, minimized: false } : {
-      x: window.innerWidth - 408 - offset, y: window.innerHeight * 0.43 + offset, width: 382, height: 336, minimized: false,
+      x: window.innerWidth - 408 - offset, y: window.innerHeight * 0.43 + offset, width: 382, height, minimized: false,
     })
     focus(id)
   }
@@ -361,6 +362,9 @@ function Rack() {
           <WidgetControls node={node} engine={engine} begin={rack.begin} end={rack.end}
             setParam={(key, value, transient) => edit(current => ({
               ...current, modules: current.modules.map(item => item.id === node.id ? { ...item, params: { ...item.params, [key]: value } } : item),
+            }), !transient)}
+            changeOscillators={(change, transient) => edit(current => ({
+              ...current, modules: current.modules.map(item => item.id === node.id ? setOscillatorLayers(item, change(oscillatorLayers(item))) : item),
             }), !transient)}
             grow={() => edit(current => ({ ...current, modules: current.modules.map(item => item.id === node.id ? { ...item, count: item.count + 1 } : item) }))} />
         </FloatingWindow>

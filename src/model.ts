@@ -4,6 +4,7 @@ export type Signal = 'audio' | 'midi'
 export type Point = { x: number; y: number }
 export type WindowState = Point & { width: number; height: number; minimized: boolean }
 export const waves = ['sine', 'square', 'sawtooth', 'triangle'] as const
+export type OscillatorLayer = { id: string; wave: typeof waves[number]; gain: number; enabled: boolean }
 export const noteFrequency = (note: number) => 440 * 2 ** ((note - 69) / 12)
 export const modules = {
   osc: { title: 'Oscillator', inputs: [], outputs: ['audio'], params: { wave: 'sine', frequency: 110, gain: 0.18 } },
@@ -20,6 +21,7 @@ export type Module = {
   position: Point
   count: number
   params: Record<string, string | number>
+  oscillators?: OscillatorLayer[]
   auto?: true
 }
 export type Wire = { id: string; source: string; sourceHandle: string; target: string; targetHandle: string }
@@ -36,7 +38,22 @@ export const uid = () => crypto.randomUUID()
 export const emptyPatch = (): Patch => ({ modules: [], wires: [], viewport: { x: 0, y: 0, zoom: 1 }, windows: {} })
 export const createProject = (name: string): Project => ({ schemaVersion: 1, id: uid(), name, patch: emptyPatch(), versions: [] })
 export function makeModule(kind: Kind, position: Point): Module {
+  if (kind === 'osc') {
+    return {
+      id: uid(), kind, position, count: 2, params: { ...modules.osc.params },
+      oscillators: [{ id: 'main', wave: 'sine', gain: modules.osc.params.gain, enabled: true }],
+    }
+  }
   return { id: uid(), kind, position, count: 2, params: { ...modules[kind].params } }
+}
+
+export function oscillatorLayers(node: Module): OscillatorLayer[] {
+  return node.oscillators ?? [{ id: 'main', wave: node.params.wave as OscillatorLayer['wave'], gain: Number(node.params.gain), enabled: true }]
+}
+
+export function setOscillatorLayers(node: Module, oscillators: OscillatorLayer[]): Module {
+  const { wave, gain } = oscillators[0]
+  return { ...node, params: { ...node.params, wave, gain }, oscillators }
 }
 
 export function ports(module: Module, side: 'in' | 'out') {

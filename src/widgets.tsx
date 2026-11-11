@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { Handle, Position, useConnection, useUpdateNodeInternals, type Node, type NodeProps } from '@xyflow/react'
 import { supportsOutputSelection, type AudioEngine } from './audio.ts'
-import { modules, noteFrequency, numeric, ports, waves, type Module, type WindowState } from './model.ts'
+import { modules, noteFrequency, numeric, oscillatorLayers, ports, uid, waves, type Module, type OscillatorLayer, type WindowState } from './model.ts'
 import { ranges } from './storage.ts'
 
 export type RackNode = Node<{ module: Module }, 'rack'>
@@ -15,7 +15,12 @@ const oscillatorPresets = Array.from({ length: 24 }, (_, index) => ({
 
 function describe(node: Module) {
   switch (node.kind) {
-    case 'osc': return node.params.wave + ' · ' + node.params.frequency + ' Hz'
+    case 'osc': {
+      const layers = oscillatorLayers(node)
+      const enabled = layers.filter(layer => layer.enabled).length
+      const summary = layers.length === 1 && enabled ? layers[0].wave : enabled + '/' + layers.length + ' активно'
+      return summary + ' · ' + node.params.frequency + ' Hz'
+    }
     case 'midi': return node.params.channel ? 'Канал ' + node.params.channel : 'Все каналы'
     case 'synth': return 'Полифония · ' + node.params.voices
     case 'mix': return node.count + ' входа · Gain ' + node.params.gain
@@ -104,8 +109,9 @@ function DeviceSelect({ label, value, defaultLabel, devices, onChange }: {
   )
 }
 
-export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
+export function WidgetControls({ node, engine, setParam, changeOscillators, begin, end, grow }: {
   node: Module; engine: AudioEngine; setParam: (key: string, value: string | number, transient?: boolean) => void
+  changeOscillators: (change: (layers: OscillatorLayer[]) => OscillatorLayer[], transient?: boolean) => void
   begin: () => void; end: () => void; grow: () => void
 }) {
   const [outputs, setOutputs] = useState<Device[]>([])
@@ -159,9 +165,9 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
     }
   }
 
-  function slider(key: string, label: string, unit = '') {
+  function slider(key: string, label: string, unit = '', value = numeric(node, key),
+    change = (next: number, transient?: boolean) => setParam(key, next, transient)) {
     const [min, max, step] = ranges[key] ?? ranges.gain
-    const value = numeric(node, key)
     const finish = () => {
       if (!rangeGesture.current) return
       rangeGesture.current = false
@@ -171,20 +177,20 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
       <div className="range field" key={key}>
         <label className="range-value">
           {label}{unit && <span className="unit">, {unit.trim()}</span>}
-          <NumberField label={label} unit={unit} value={value} min={min} max={max} step={step} change={next => setParam(key, next)} />
+          <NumberField label={label} unit={unit} value={value} min={min} max={max} step={step} change={change} />
         </label>
         <input type="range" aria-label={label + ' — ползунок'} min={min} max={max} step={step} value={value} onPointerDown={event => {
           event.currentTarget.setPointerCapture(event.pointerId)
           rangeGesture.current = true
           begin()
         }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
-          onChange={event => setParam(key, event.currentTarget.valueAsNumber, rangeGesture.current)} />
+          onChange={event => change(event.currentTarget.valueAsNumber, rangeGesture.current)} />
       </div>
     )
   }
 
   return <>
-    {(node.kind === 'osc' || node.kind === 'synth') && (
+    {node.kind === 'synth' && (
       <label className="field"><span>Форма волны</span><select value={node.params.wave} onChange={event => setParam('wave', event.target.value)}>
         {waves.map(wave => <option key={wave}>{wave}</option>)}
       </select></label>
@@ -198,6 +204,28 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
         </select>
       </label>
       {slider('frequency', 'Частота', ' Гц')}
+      {oscillatorLayers(node).map((layer, index, layers) => {
+        const title = 'Генератор ' + (index + 1)
+        const update = (values: Partial<OscillatorLayer>, transient?: boolean) =>
+          changeOscillators(current => current.map(item => item.id === layer.id ? { ...item, ...values } : item), transient)
+        return <fieldset className="oscillator-layer" key={layer.id}>
+          <legend>{title}</legend>
+          <div className="oscillator-actions">
+            <label><input type="checkbox" checked={layer.enabled} onChange={event => update({ enabled: event.target.checked })} /> Активен</label>
+            {layers.length > 1 && <button aria-label={'Удалить генератор ' + (index + 1)}
+              onClick={() => changeOscillators(current => current.filter(item => item.id !== layer.id))}>Удалить</button>}
+          </div>
+          <label className="field"><span>Форма волны</span>
+            <select value={layer.wave} onChange={event => update({ wave: event.target.value as OscillatorLayer['wave'] })}>
+              {waves.map(wave => <option key={wave}>{wave}</option>)}
+            </select>
+          </label>
+          {slider('gain', 'Gain', '', layer.gain, (gain, transient) => update({ gain }, transient))}
+        </fieldset>
+      })}
+      <button onClick={() => changeOscillators(layers => [...layers, { id: uid(), wave: 'sine', gain: modules.osc.params.gain, enabled: true }])}>
+        Добавить генератор
+      </button>
     </>}
     {node.kind === 'synth' && <>
       {slider('voices', 'Голосов')}
@@ -213,7 +241,7 @@ export function WidgetControls({ node, engine, setParam, begin, end, grow }: {
         <option value={0}>Все каналы</option>
         {Array.from({ length: 16 }, (_, index) => <option key={index} value={index + 1}>{index + 1}</option>)}
       </select></label>
-    </> : slider('gain', node.kind === 'split' ? 'Входной gain' : 'Gain')}
+    </> : node.kind !== 'osc' && slider('gain', node.kind === 'split' ? 'Входной gain' : 'Gain')}
     {node.kind === 'out' && <>
       <DeviceSelect label="Аудиоустройство" value={String(node.params.device)} defaultLabel="Системный выход" devices={outputs}
         onChange={value => setParam('device', value)} />
