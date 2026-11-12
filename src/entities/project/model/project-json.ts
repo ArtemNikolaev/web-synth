@@ -32,8 +32,8 @@ function validPatch(value: unknown): value is Patch {
       }
     }
     const kind = node.kind as Kind
-    const { params: defaults, dynamicPorts } = modules[kind]
-    if (Object.keys(defaults).some(key => !Object.hasOwn(node.params as object, key))) return false
+    const { params: defaults, dynamicPorts, optionalParams } = modules[kind]
+    if (Object.keys(defaults).some(key => !optionalParams?.includes(key) && !Object.hasOwn(node.params as object, key))) return false
     for (const [key, param] of Object.entries(node.params)) {
       if (key === 'device' && Object.hasOwn(defaults, 'device') && typeof param === 'string') continue
       if (key === 'wave' && Object.hasOwn(defaults, 'wave') && waves.includes(param as typeof waves[number])) continue

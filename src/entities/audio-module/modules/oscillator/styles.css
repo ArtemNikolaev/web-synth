@@ -1,6 +1,3 @@
-.oscillator-layer { min-width: 0; margin: 0 0 12px; padding: 10px; border: 1px solid #56708e; border-radius: 7px; }
-.oscillator-layer legend { padding: 0 5px; font-size: 13px; font-weight: 600; }
-.oscillator-layer .field:last-child { margin-bottom: 0; }
-.oscillator-actions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
-.oscillator-actions input { accent-color: #82d5fc; }
-.oscillator-actions button { padding: 4px 8px; }
+.oscillator-section { min-width: 0; margin: 0 0 12px; padding: 10px; border: 1px solid #56708e; border-radius: 7px; }
+.oscillator-section legend { padding: 0 5px; font-size: 13px; font-weight: 600; }
+.oscillator-section .field:last-child { margin-bottom: 0; }

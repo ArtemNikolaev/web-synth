@@ -85,3 +85,22 @@ test('oscillator layers preserve legacy settings and round-trip independently', 
   project.patch.modules = [malformed]
   assert.throws(() => importProject(serializeProject(project)))
 })
+
+test('new oscillators start with four muted waves and persist output gain independently', () => {
+  const oscillator = node('osc')
+  assert.deepEqual(oscillatorLayers(oscillator).map(({ wave, gain, enabled }) => [wave, gain, enabled]), [
+    ['sine', 0, true], ['square', 0, true], ['sawtooth', 0, true], ['triangle', 0, true],
+  ])
+  assert.equal(oscillator.params.outputGain, 1)
+
+  const project = createProject('Oscillator mix')
+  const mixed = setOscillatorLayers(oscillator, oscillatorLayers(oscillator).map(layer =>
+    layer.wave === 'triangle' ? { ...layer, gain: 0.6 } : layer))
+  project.patch.modules = [{ ...mixed, params: { ...mixed.params, outputGain: 0.25 } }]
+  const [restored] = importProject(serializeProject(project)).patch.modules
+  assert.equal(restored.params.outputGain, 0.25)
+  assert.deepEqual(oscillatorLayers(restored), oscillatorLayers(mixed))
+  restored.params.outputGain = 3
+  project.patch.modules = [restored]
+  assert.throws(() => importProject(serializeProject(project)))
+})

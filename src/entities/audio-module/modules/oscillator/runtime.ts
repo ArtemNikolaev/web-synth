@@ -1,4 +1,4 @@
-import { numeric, type Module } from '../../model/contract.ts'
+import { numeric, waves, type Module } from '../../model/contract.ts'
 import { oscillatorLayers } from './definition.ts'
 import type { CreateModuleRuntime } from '../../lib/runtime-contract.ts'
 
@@ -6,9 +6,21 @@ type Generator = { oscillator: OscillatorNode; level: GainNode }
 
 export const createOscillator: CreateModuleRuntime = ({ context: ctx, ramp }, bus) => {
   const generators = new Map<string, Generator>()
+  let initialized = false
 
   function apply(node: Module) {
+    const outputGain = numeric(node, 'outputGain')
+    if (initialized) ramp(bus.gain, outputGain)
+    else {
+      bus.gain.value = outputGain
+      initialized = true
+    }
     const active = oscillatorLayers(node).filter(layer => layer.enabled)
+      .map(layer => ({ ...layer, id: 'layer:' + layer.id }))
+    const present = new Set(active.map(layer => layer.wave))
+    for (const wave of waves) {
+      if (!present.has(wave)) active.push({ id: 'silent:' + wave, wave, gain: 0, enabled: true })
+    }
     const ids = new Set(active.map(layer => layer.id))
     for (const [id, generator] of generators) {
       if (ids.has(id)) continue

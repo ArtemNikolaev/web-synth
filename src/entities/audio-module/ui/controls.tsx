@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { numeric, type Module, type OscillatorLayer } from '../model/contract.ts'
+import { numeric, type Module, type OscillatorLayer, type ParameterRange } from '../model/contract.ts'
 import { gainRange, parameterRange } from '../model/catalog.ts'
 import './controls.css'
 
@@ -65,8 +65,9 @@ export function DeviceSelect({ label, value, defaultLabel, devices, onChange }: 
 export function useSlider({ node, setParam, begin, end }: ControlProps) {
   const rangeGesture = useRef(false)
   function slider(key: string, label: string, unit = '', value = numeric(node, key),
-    change = (next: number, transient?: boolean) => setParam(key, next, transient)) {
-    const [min, max, step] = parameterRange(node.kind, key) ?? gainRange
+    change = (next: number, transient?: boolean) => setParam(key, next, transient),
+    range: ParameterRange = parameterRange(node.kind, key) ?? gainRange) {
+    const [min, max, step] = range
     const finish = () => {
       if (!rangeGesture.current) return
       rangeGesture.current = false

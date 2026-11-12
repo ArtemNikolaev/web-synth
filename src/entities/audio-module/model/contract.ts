@@ -24,6 +24,7 @@ export type ModuleDefinition = {
   outputs: readonly Signal[]
   params: Record<string, string | number>
   ranges?: Readonly<Record<string, ParameterRange>>
+  optionalParams?: readonly string[]
   dynamicPorts?: 'in' | 'out'
   initialOscillators?: () => OscillatorLayer[]
   windowHeight?: number
