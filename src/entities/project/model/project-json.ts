@@ -1,59 +1,7 @@
-import { canConnect, createProject, kinds, modules, signalAt, uid, waves, type Kind, type Patch, type Project } from './model.ts'
+import { canConnect, kinds, modules, ranges, signalAt, uid, waves, type Kind, type Patch, type Project } from './patch.ts'
 
-export const ranges: Record<string, [number, number, number]> = {
-  gain: [0, 2, 0.01],
-  frequency: [20, 12000, 0.01],
-  voices: [1, 32, 1],
-  attack: [0.001, 2, 0.001],
-  release: [0.01, 5, 0.01],
-  channel: [0, 16, 1],
-}
-
-type Library = { current: string; projects: Project[] }
-let db: Promise<IDBDatabase> | undefined
-
-function open() {
-  db ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('websynth', 1)
-    request.onupgradeneeded = () => request.result.createObjectStore('library')
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-  return db
-}
-
-export async function loadLibrary(): Promise<Library> {
-  const database = await open()
-  return new Promise((resolve, reject) => {
-    const request = database.transaction('library').objectStore('library').get('state')
-    request.onsuccess = () => {
-      if (request.result) resolve(request.result)
-      else {
-        const first = createProject('Новый проект')
-        resolve({ current: first.id, projects: [first] })
-      }
-    }
-    request.onerror = () => reject(request.error)
-  })
-}
-
-export async function saveLibrary(library: Library) {
-  const database = await open()
-  return new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction('library', 'readwrite')
-    transaction.oncomplete = () => resolve()
-    transaction.onabort = () => reject(transaction.error)
-    transaction.objectStore('library').put(library, 'state')
-  })
-}
-
-export function exportProject(project: Project) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = project.name.replace(/[<>:"/\\|?*]/g, '_') + '.json'
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+export function serializeProject(project: Project) {
+  return JSON.stringify(project, null, 2)
 }
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)

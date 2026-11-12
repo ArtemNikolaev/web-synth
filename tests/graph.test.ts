@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { canConnect, connect, createProject, duplicate, emptyPatch, makeModule, oscillatorLayers, remove, setOscillatorLayers, type Module } from '../src/model.ts'
-import { importProject } from '../src/storage.ts'
+import { canConnect, connect, createProject, duplicate, emptyPatch, importProject, makeModule, oscillatorLayers, remove, serializeProject, setOscillatorLayers, type Module } from '../src/entities/project/index.ts'
 
 const node = (kind: Module['kind']) => makeModule(kind, { x: 0, y: 0 })
 const wire = (source: Module, target: Module, output = 0, input = 0) => ({
@@ -59,12 +58,12 @@ test('project JSON round-trips working state and named versions and rejects inva
   const project = createProject('Round trip')
   project.patch = connect({ ...project.patch, modules: [a, b] }, wire(a, b))
   project.versions = [{ id: 'saved', name: 'Saved', date: '2026-11-11T00:00:00.000Z', patch: project.patch }]
-  const imported = importProject(JSON.stringify(project))
+  const imported = importProject(serializeProject(project))
   assert.notEqual(imported.id, project.id)
   assert.deepEqual(imported.patch, project.patch)
   assert.deepEqual(imported.versions, project.versions)
   project.patch.wires[0].targetHandle = 'in-999'
-  assert.throws(() => importProject(JSON.stringify(project)))
+  assert.throws(() => importProject(serializeProject(project)))
 })
 
 test('oscillator layers preserve legacy settings and round-trip independently', () => {
@@ -73,10 +72,15 @@ test('oscillator layers preserve legacy settings and round-trip independently', 
   assert.deepEqual(first, { id: 'main', wave: 'triangle', gain: 0.4, enabled: true })
 
   const project = createProject('Layers')
+  project.patch.modules = [legacy]
+  const [importedLegacy] = importProject(serializeProject(project)).patch.modules
+  assert.equal(importedLegacy.oscillators, undefined)
+  assert.deepEqual(oscillatorLayers(importedLegacy), [first])
+
   const layered = setOscillatorLayers(legacy, [first, { id: 'second', wave: 'square', gain: 0.2, enabled: false }])
   project.patch.modules = [layered]
-  assert.deepEqual(importProject(JSON.stringify(project)).patch.modules, [layered])
+  assert.deepEqual(importProject(serializeProject(project)).patch.modules, [layered])
   const malformed = setOscillatorLayers(legacy, [first, { ...first, wave: 'square' }])
   project.patch.modules = [malformed]
-  assert.throws(() => importProject(JSON.stringify(project)))
+  assert.throws(() => importProject(serializeProject(project)))
 })

@@ -1,19 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { createRoot } from 'react-dom/client'
 import {
   Background, BackgroundVariant, BaseEdge, ConnectionLineType, getSmoothStepPath, ReactFlow,
-  ReactFlowProvider, SelectionMode, useReactFlow, type Connection, type Edge, type EdgeProps,
+  SelectionMode, useReactFlow, type Connection, type Edge, type EdgeProps,
   type NodeChange,
 } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import './style.css'
-import {
-  canConnect, connect, createProject, duplicate, makeModule, modules, oscillatorLayers, remove, setOscillatorLayers, signalAt, uid,
-  type Kind, type WindowState, type Wire,
-} from './model.ts'
-import { exportProject, importProject } from './storage.ts'
-import { useRack } from './useRack.ts'
-import { FloatingWindow, nodeTypes, WidgetControls, type RackNode } from './widgets.tsx'
+import './rack.css'
+import { modules, signalAt, type Kind, type Wire } from '../../../entities/project/index.ts'
+import { downloadProject } from '../lib/download-project.ts'
+import { useRack } from '../model/use-rack.ts'
+import { FloatingWindow, nodeTypes, WidgetControls, type RackNode } from './module-controls.tsx'
 
 type RackEdge = Edge<{ signal: string }, 'cable'>
 function Cable(props: EdgeProps<RackEdge>) {
@@ -29,7 +24,7 @@ const catalog: { title: string; kinds: Kind[] }[] = [
 const statuses = { loading: 'Загрузка…', saving: 'Сохранение…', saved: 'Автосохранено', error: 'Ошибка сохранения' }
 type Dialog = { title: string; label: string; value?: string; description?: string; danger?: boolean; submit: (value: string) => void | Promise<unknown> }
 
-function Rack() {
+export function RackPage() {
   const rack = useRack()
   const { project, library, engine } = rack
   const patch = project?.patch
@@ -70,8 +65,6 @@ function Rack() {
     setWindowOrder([])
   }, [project?.id])
 
-  const edit = rack.updatePatch
-
   function startAudio() {
     setAudioError('')
     void engine.start().catch(() => setAudioError('Не удалось включить аудио. Попробуйте ещё раз.'))
@@ -103,12 +96,12 @@ function Rack() {
   }
 
   function copy(ids: Set<string>) {
-    if (ids.size) edit(current => duplicate(current, ids))
+    rack.duplicateModules(ids)
     setContext(undefined)
   }
 
   function erase(ids: Set<string>, wires = new Set<string>()) {
-    if (ids.size || wires.size) edit(current => remove(current, ids, wires))
+    rack.removeSelection(ids, wires)
     setContext(undefined)
   }
 
@@ -168,18 +161,11 @@ function Rack() {
       return ids
     })
     const positions = new Map(changes.flatMap(change => change.type === 'position' && change.position ? [[change.id, change.position] as const] : []))
-    if (positions.size) edit(current => {
-      const moved = current.modules.map(module => {
-        const position = positions.get(module.id)
-        return position && (position.x !== module.position.x || position.y !== module.position.y) ? { ...module, position } : module
-      })
-      return moved.some((module, index) => module !== current.modules[index]) ? { ...current, modules: moved } : current
-    }, false)
+    rack.moveModules(positions)
   }
 
   function valid(connection: Connection | RackEdge) {
-    const current = rack.currentPatch()
-    return Boolean(current && connection.sourceHandle && connection.targetHandle && canConnect(current, {
+    return Boolean(connection.sourceHandle && connection.targetHandle && rack.canAttach({
       source: connection.source, target: connection.target, sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle,
     }))
   }
@@ -187,20 +173,15 @@ function Rack() {
   function attach(connection: Connection, record = true) {
     if (!connection.sourceHandle || !connection.targetHandle) return
     const wire = { ...connection, sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle }
-    edit(current => connect(current, wire), record)
+    rack.attach(wire, record)
   }
 
   function add(kind: Kind) {
     if (!canvas.current) return
     const rect = canvas.current.getBoundingClientRect()
     const point = flow.screenToFlowPosition({ x: rect.left + rect.width * 0.42 - 80, y: rect.top + rect.height * 0.42 - 40 })
-    const node = makeModule(kind, point)
-    while (patch?.modules.some(item => Math.abs(item.position.x - point.x) < 190 && Math.abs(item.position.y - point.y) < 105)) {
-      point.x += 48
-      point.y += 40
-    }
-    edit(current => ({ ...current, modules: [...current.modules, node] }))
-    setSelected(new Set([node.id]))
+    const id = rack.addModule(kind, point)
+    setSelected(new Set([id]))
     setSelectedEdges(new Set())
     setMenu(undefined)
   }
@@ -209,20 +190,11 @@ function Rack() {
     setWindowOrder(order => [...order.filter(item => item !== id), id])
   }
 
-  function changeWindow(id: string, win?: WindowState) {
-    edit(current => {
-      const windows = { ...current.windows }
-      if (win) windows[id] = win
-      else delete windows[id]
-      return { ...current, windows }
-    }, false)
-  }
-
   function openWindow(id: string) {
     const existing = patch?.windows[id]
     const offset = (Object.keys(patch?.windows ?? {}).length % 7) * 26
     const height = patch?.modules.find(node => node.id === id)?.kind === 'osc' ? 430 : 336
-    changeWindow(id, existing ? { ...existing, minimized: false } : {
+    rack.changeWindow(id, existing ? { ...existing, minimized: false } : {
       x: window.innerWidth - 408 - offset, y: window.innerHeight * 0.43 + offset, width: 382, height, minimized: false,
     })
     focus(id)
@@ -230,9 +202,8 @@ function Rack() {
 
   if (!project || !patch || !library) return <main className="loading">{rack.error || 'Загрузка Modular Audio Rack…'}</main>
 
-  async function addProject(next: typeof project) {
-    if (!next) return
-    if (await rack.changeLibrary(current => ({ current: next.id, projects: [...current.projects, next] }))) setMenu(undefined)
+  async function closeMenuAfter(action: Promise<boolean>) {
+    if (await action) setMenu(undefined)
   }
 
   return <main className="app" onPointerDown={() => { if (context) setContext(undefined) }}>
@@ -246,22 +217,16 @@ function Rack() {
           {menu === 'projects' && <div className="popover project-menu">
             <div className="project-list">
               {library.projects.map(item => <button key={item.id} className={item.id === project.id ? 'current' : ''} onClick={async () => {
-                if (item.id === project.id || await rack.changeLibrary(current => ({ ...current, current: item.id }))) setMenu(undefined)
+                if (item.id === project.id || await rack.selectProject(item.id)) setMenu(undefined)
               }}>{item.name}{item.id === project.id && <span aria-hidden="true">✓</span>}</button>)}
             </div>
             <div className="menu-actions">
-              <button onClick={() => ask({ title: 'Новый проект', label: 'Создать проект', value: '', submit: name => addProject(createProject(name)) })}>Создать проект</button>
-              <button onClick={() => ask({ title: 'Переименовать проект', label: 'Сохранить', value: project.name, submit: name => rack.updateProject(item => ({ ...item, name })) })}>Переименовать</button>
-              <button onClick={() => addProject({ ...project, id: uid(), name: project.name + ' (копия)' })}>Дублировать</button>
+              <button onClick={() => ask({ title: 'Новый проект', label: 'Создать проект', value: '', submit: name => closeMenuAfter(rack.createProject(name)) })}>Создать проект</button>
+              <button onClick={() => ask({ title: 'Переименовать проект', label: 'Сохранить', value: project.name, submit: name => rack.renameProject(name) })}>Переименовать</button>
+              <button onClick={() => closeMenuAfter(rack.duplicateProject(project))}>Дублировать</button>
               <button onClick={() => file.current?.click()}>Импорт JSON</button>
-              <button onClick={() => exportProject(project)}>Экспорт JSON</button>
-              <button className="danger" onClick={() => ask({ title: 'Удалить проект?', label: 'Удалить проект', description: project.name, danger: true, submit: async () => {
-                if (await rack.changeLibrary(current => {
-                  const projects = current.projects.filter(item => item.id !== project.id)
-                  if (!projects.length) projects.push(createProject('Новый проект'))
-                  return { projects, current: projects[0].id }
-                })) setMenu(undefined)
-              } })}>Удалить проект</button>
+              <button onClick={() => downloadProject(project)}>Экспорт JSON</button>
+              <button className="danger" onClick={() => ask({ title: 'Удалить проект?', label: 'Удалить проект', description: project.name, danger: true, submit: () => closeMenuAfter(rack.deleteProject(project.id)) })}>Удалить проект</button>
             </div>
           </div>}
         </div>
@@ -270,24 +235,21 @@ function Rack() {
           const selectedFile = input.files?.[0]
           input.value = ''
           if (!selectedFile) return
-          try { await addProject(importProject(await selectedFile.text())) }
-          catch { rack.setError('Не удалось импортировать проект. Проверьте формат и версию JSON.') }
+          await closeMenuAfter(rack.importFile(selectedFile))
         }} />
         <div className="toolbar-spacer" />
         <span className={'save-status ' + rack.status} role="status"><i />{statuses[rack.status]}</span>
         <button className={engine.active ? 'audio-active' : 'primary'} onClick={startAudio} disabled={engine.active}>{engine.active ? 'Звук включён' : 'Включить звук'}</button>
         <button onClick={() => ask({
           title: 'Сохранить версию', label: 'Сохранить версию', value: '',
-          submit: name => rack.updateProject(item => ({
-            ...item, versions: [...item.versions, { id: uid(), name, date: new Date().toISOString(), patch: item.patch }],
-          })),
+          submit: rack.saveVersion,
         })}>Сохранить версию</button>
         <button className={menu === 'history' ? 'current' : ''} onClick={() => toggle('history')} aria-expanded={menu === 'history'}>История версий</button>
       </header>
 
       <div className="canvas" ref={canvas}>
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-          viewport={patch.viewport} onViewportChange={viewport => edit(current => ({ ...current, viewport }), false)}
+          viewport={patch.viewport} onViewportChange={rack.changeViewport}
           onNodesChange={changeNodes} onEdgesChange={changes => {
             const changesToSelection = changes.filter(change => change.type === 'select')
             if (changesToSelection.length) setSelectedEdges(previous => {
@@ -314,7 +276,7 @@ function Rack() {
             if (!wire) return
             rack.begin()
             setReconnecting(wire)
-            edit(current => ({ ...current, wires: current.wires.filter(item => item.id !== edge.id) }), false)
+            rack.detach(edge.id)
           }}
           onReconnect={(_, connection) => attach(connection, false)}
           onReconnectEnd={() => { setReconnecting(undefined); rack.end() }}
@@ -357,16 +319,12 @@ function Rack() {
         const win = patch.windows[node.id]
         if (!win) return null
         return <FloatingWindow key={project.id + node.id} title={modules[node.kind].title + ' · параметры'} win={win}
-          z={20 + Math.max(0, windowOrder.indexOf(node.id))} focus={() => focus(node.id)} close={() => changeWindow(node.id)}
-          change={next => changeWindow(node.id, next)}>
+          z={20 + Math.max(0, windowOrder.indexOf(node.id))} focus={() => focus(node.id)} close={() => rack.changeWindow(node.id)}
+          change={next => rack.changeWindow(node.id, next)}>
           <WidgetControls node={node} engine={engine} begin={rack.begin} end={rack.end}
-            setParam={(key, value, transient) => edit(current => ({
-              ...current, modules: current.modules.map(item => item.id === node.id ? { ...item, params: { ...item.params, [key]: value } } : item),
-            }), !transient)}
-            changeOscillators={(change, transient) => edit(current => ({
-              ...current, modules: current.modules.map(item => item.id === node.id ? setOscillatorLayers(item, change(oscillatorLayers(item))) : item),
-            }), !transient)}
-            grow={() => edit(current => ({ ...current, modules: current.modules.map(item => item.id === node.id ? { ...item, count: item.count + 1 } : item) }))} />
+            setParam={(key, value, transient) => rack.setParam(node.id, key, value, transient)}
+            changeOscillators={(change, transient) => rack.changeOscillators(node.id, change, transient)}
+            grow={() => rack.growModule(node.id)} />
         </FloatingWindow>
       })}
 
@@ -376,14 +334,14 @@ function Rack() {
         {[...project.versions].reverse().map(version => <section key={version.id} className="version">
           <strong>{version.name}</strong><time dateTime={version.date}>{new Date(version.date).toLocaleString('ru-RU')}</time>
           <div className="version-actions">
-            <button onClick={() => edit(() => version.patch)}>Восстановить</button>
+            <button onClick={() => rack.restoreVersion(version)}>Восстановить</button>
             <button onClick={() => ask({
               title: 'Переименовать версию', label: 'Сохранить', value: version.name,
-              submit: name => rack.updateProject(item => ({ ...item, versions: item.versions.map(entry => entry.id === version.id ? { ...entry, name } : entry) })),
+              submit: name => rack.renameVersion(version.id, name),
             })}>Переименовать</button>
             <button className="danger" onClick={() => ask({
               title: 'Удалить версию?', description: version.name, label: 'Удалить версию', danger: true,
-              submit: () => rack.updateProject(item => ({ ...item, versions: item.versions.filter(entry => entry.id !== version.id) })),
+              submit: () => rack.deleteVersion(version.id),
             })}>Удалить</button>
           </div>
         </section>)}
@@ -396,7 +354,7 @@ function Rack() {
       </div>}
       {(rack.error || audioError || rack.status === 'error') && <div className="notice" role="alert">
         <span>{rack.error || audioError || 'Изменения не сохранены. Выгрузите проект в JSON.'}</span>
-        {rack.status === 'error' && <button onClick={() => exportProject(project)}>Экспорт JSON</button>}
+        {rack.status === 'error' && <button onClick={() => downloadProject(project)}>Экспорт JSON</button>}
         {(rack.error || audioError) && <button aria-label="Закрыть уведомление" onClick={() => { rack.setError(''); setAudioError('') }}>×</button>}
       </div>}
     </div>
@@ -415,5 +373,3 @@ function Rack() {
     </div>}
   </main>
 }
-
-createRoot(document.getElementById('root')!).render(<ReactFlowProvider><Rack /></ReactFlowProvider>)

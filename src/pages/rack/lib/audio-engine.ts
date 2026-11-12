@@ -1,4 +1,4 @@
-import { noteFrequency, numeric, oscillatorLayers, ports, signalAt, type Module, type Patch, type Wire } from './model.ts'
+import { noteFrequency, numeric, oscillatorLayers, ports, signalAt, type Module, type Patch, type Wire } from '../../../entities/project/index.ts'
 
 type SinkElement = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
 type Voice = { note: number; channel: number; oscillator: OscillatorNode; level: GainNode; start: number; attack: number; peak: number; released: boolean }

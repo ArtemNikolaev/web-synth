@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AudioEngine } from './audio.ts'
-import { emptyPatch, type Patch, type Project } from './model.ts'
-import { loadLibrary, saveLibrary } from './storage.ts'
+import { AudioEngine } from '../lib/audio-engine.ts'
+import {
+  canConnect, connect, createProject, duplicate, emptyPatch, importProject, makeModule,
+  oscillatorLayers, remove, setOscillatorLayers, uid,
+  type Kind, type Module, type OscillatorLayer, type Patch, type Point, type Project, type Version, type WindowState, type Wire,
+} from '../../../entities/project/index.ts'
+import { loadLibrary, saveLibrary } from '../api/project-library.ts'
 
 type Library = Awaited<ReturnType<typeof loadLibrary>>
 type SaveStatus = 'loading' | 'saving' | 'saved' | 'error'
@@ -157,10 +161,97 @@ export function useRack() {
     }
   }
 
+  function addProject(project: Project) {
+    return changeLibrary(current => ({ current: project.id, projects: [...current.projects, project] }))
+  }
+
+  function deleteProject(id: string) {
+    return changeLibrary(current => {
+      const projects = current.projects.filter(project => project.id !== id)
+      if (!projects.length) projects.push(createProject('Новый проект'))
+      return { projects, current: projects[0].id }
+    })
+  }
+
+  function addModule(kind: Kind, point: Point) {
+    const position = { ...point }
+    const patch = library && active(library).patch
+    while (patch?.modules.some(item => Math.abs(item.position.x - position.x) < 190 && Math.abs(item.position.y - position.y) < 105)) {
+      position.x += 48
+      position.y += 40
+    }
+    const node = makeModule(kind, position)
+    updatePatch(current => ({ ...current, modules: [...current.modules, node] }))
+    return node.id
+  }
+
+  function moveModules(positions: ReadonlyMap<string, Point>) {
+    if (!positions.size) return
+    updatePatch(current => {
+      const moved = current.modules.map(module => {
+        const position = positions.get(module.id)
+        return position && (position.x !== module.position.x || position.y !== module.position.y) ? { ...module, position } : module
+      })
+      return moved.some((module, index) => module !== current.modules[index]) ? { ...current, modules: moved } : current
+    }, false)
+  }
+
+  function changeWindow(id: string, win?: WindowState) {
+    updatePatch(current => {
+      const windows = { ...current.windows }
+      if (win) windows[id] = win
+      else delete windows[id]
+      return { ...current, windows }
+    }, false)
+  }
+
+  function changeModule(id: string, change: (module: Module) => Module, transient = false) {
+    updatePatch(current => ({
+      ...current, modules: current.modules.map(module => module.id === id ? change(module) : module),
+    }), !transient)
+  }
+
   return {
     library, project: library && active(library), status, error, setError, busy, engine,
     begin, end, step, canUndo: undo.current.length > 0, canRedo: redo.current.length > 0,
-    updateProject, updatePatch, changeLibrary,
-    currentPatch: () => state.current && active(state.current).patch,
+    createProject: (name: string) => addProject(createProject(name)),
+    duplicateProject: (project: Project) => addProject({ ...project, id: uid(), name: project.name + ' (копия)' }),
+    renameProject: (name: string) => updateProject(project => ({ ...project, name })),
+    selectProject: (id: string) => changeLibrary(current => ({ ...current, current: id })),
+    deleteProject,
+    async importFile(file: File) {
+      try { return await addProject(importProject(await file.text())) }
+      catch {
+        setError('Не удалось импортировать проект. Проверьте формат и версию JSON.')
+        return false
+      }
+    },
+    saveVersion: (name: string) => updateProject(project => ({
+      ...project, versions: [...project.versions, { id: uid(), name, date: new Date().toISOString(), patch: project.patch }],
+    })),
+    restoreVersion: (version: Version) => updatePatch(() => version.patch),
+    renameVersion: (id: string, name: string) => updateProject(project => ({
+      ...project, versions: project.versions.map(version => version.id === id ? { ...version, name } : version),
+    })),
+    deleteVersion: (id: string) => updateProject(project => ({
+      ...project, versions: project.versions.filter(version => version.id !== id),
+    })),
+    addModule, moveModules, changeWindow,
+    duplicateModules: (ids: Set<string>) => { if (ids.size) updatePatch(current => duplicate(current, ids)) },
+    removeSelection: (ids: Set<string>, wires: Set<string>) => {
+      if (ids.size || wires.size) updatePatch(current => remove(current, ids, wires))
+    },
+    canAttach(wire: Omit<Wire, 'id'>) {
+      const current = state.current && active(state.current).patch
+      return current ? canConnect(current, wire) : false
+    },
+    attach: (wire: Omit<Wire, 'id'>, record: boolean) => updatePatch(current => connect(current, wire), record),
+    detach: (id: string) => updatePatch(current => ({ ...current, wires: current.wires.filter(wire => wire.id !== id) }), false),
+    changeViewport: (viewport: Patch['viewport']) => updatePatch(current => ({ ...current, viewport }), false),
+    setParam: (id: string, key: string, value: string | number, transient?: boolean) =>
+      changeModule(id, module => ({ ...module, params: { ...module.params, [key]: value } }), transient),
+    changeOscillators: (id: string, change: (layers: OscillatorLayer[]) => OscillatorLayer[], transient?: boolean) =>
+      changeModule(id, module => setOscillatorLayers(module, change(oscillatorLayers(module))), transient),
+    growModule: (id: string) => changeModule(id, module => ({ ...module, count: module.count + 1 })),
   }
 }

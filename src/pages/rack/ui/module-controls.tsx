@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { Handle, Position, useConnection, useUpdateNodeInternals, type Node, type NodeProps } from '@xyflow/react'
-import { supportsOutputSelection, type AudioEngine } from './audio.ts'
-import { modules, noteFrequency, numeric, oscillatorLayers, ports, uid, waves, type Module, type OscillatorLayer, type WindowState } from './model.ts'
-import { ranges } from './storage.ts'
+import { supportsOutputSelection, type AudioEngine } from '../lib/audio-engine.ts'
+import { modules, noteFrequency, numeric, oscillatorLayers, ports, ranges, uid, waves, type Module, type OscillatorLayer, type WindowState } from '../../../entities/project/index.ts'
 
 export type RackNode = Node<{ module: Module }, 'rack'>
 export const nodeTypes = { rack: RackModule }

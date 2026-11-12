@@ -155,3 +155,12 @@ export function duplicate(patch: Patch, ids: Set<string>): Patch {
 }
 
 export const numeric = (node: Module, key: string, fallback = 1) => Number(node.params[key] ?? fallback)
+
+export const ranges: Record<string, [number, number, number]> = {
+  gain: [0, 2, 0.01],
+  frequency: [20, 12000, 0.01],
+  voices: [1, 32, 1],
+  attack: [0.001, 2, 0.001],
+  release: [0.01, 5, 0.01],
+  channel: [0, 16, 1],
+}

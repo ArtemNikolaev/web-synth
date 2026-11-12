@@ -1,5 +1,7 @@
 # Modular Audio Rack
 
+Правила архитектуры и расширения проекта описаны в [AGENTS.md](AGENTS.md), порядок добавления аудиомодулей — в [WIDGET_DEVELOPMENT.md](WIDGET_DEVELOPMENT.md).
+
 Браузерный аудиорэк на TypeScript, React Flow, Web Audio и Web MIDI. Для работы используйте настольный Chrome.
 
 ```sh
