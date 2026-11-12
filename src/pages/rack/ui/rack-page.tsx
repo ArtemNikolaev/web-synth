@@ -1,26 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import {
-  Background, BackgroundVariant, BaseEdge, ConnectionLineType, getSmoothStepPath, ReactFlow,
-  SelectionMode, useReactFlow, type Connection, type Edge, type EdgeProps,
-  type NodeChange,
-} from '@xyflow/react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './rack.css'
-import { modules, signalAt, type Kind, type Wire } from '../../../entities/project/index.ts'
+import { AudioModuleControls, kinds, modules } from '../../../entities/audio-module/index.ts'
 import { downloadProject } from '../lib/download-project.ts'
 import { useRack } from '../model/use-rack.ts'
-import { FloatingWindow, nodeTypes, WidgetControls, type RackNode } from './module-controls.tsx'
+import { RackCanvas } from '../../../widgets/rack-canvas/index.ts'
+import { FloatingWindow } from './floating-window.tsx'
 
-type RackEdge = Edge<{ signal: string }, 'cable'>
-function Cable(props: EdgeProps<RackEdge>) {
-  const [path] = getSmoothStepPath({ ...props, borderRadius: 0, offset: 24 })
-  return <BaseEdge id={props.id} path={path} interactionWidth={18} style={props.style} className={props.data?.signal} />
-}
-const edgeTypes = { cable: Cable }
-const catalog: { title: string; kinds: Kind[] }[] = [
-  { title: 'Input', kinds: ['osc', 'midi'] },
-  { title: 'Through', kinds: ['synth', 'mix', 'split'] },
-  { title: 'Output', kinds: ['out'] },
-]
+const catalog = (['Input', 'Through', 'Output'] as const).map(title => ({
+  title,
+  kinds: kinds.filter(kind => modules[kind].group === title),
+}))
 const statuses = { loading: 'Загрузка…', saving: 'Сохранение…', saved: 'Автосохранено', error: 'Ошибка сохранения' }
 type Dialog = { title: string; label: string; value?: string; description?: string; danger?: boolean; submit: (value: string) => void | Promise<unknown> }
 
@@ -28,40 +17,14 @@ export function RackPage() {
   const rack = useRack()
   const { project, library, engine } = rack
   const patch = project?.patch
-  const flow = useReactFlow<RackNode, RackEdge>()
-  const canvas = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
   const [menu, setMenu] = useState<'projects' | 'catalog' | 'history'>()
   const [dialog, setDialog] = useState<Dialog>()
   const [dialogValue, setDialogValue] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [selectedEdges, setSelectedEdges] = useState<Set<string>>(new Set())
-  const [measurements, setMeasurements] = useState<Record<string, NonNullable<RackNode['measured']>>>({})
-  const [reconnecting, setReconnecting] = useState<Wire>()
-  const [context, setContext] = useState<{ id: string; x: number; y: number }>()
+  const [context, setContext] = useState<{ id: string; x: number; y: number; selection: Set<string> }>()
   const [windowOrder, setWindowOrder] = useState<string[]>([])
   const [audioError, setAudioError] = useState('')
-  const [panning, setPanning] = useState(false)
-
-  const nodes = useMemo(() => patch?.modules.map(module => ({
-    id: module.id, position: module.position, type: 'rack' as const, data: { module },
-    selected: selected.has(module.id), measured: measurements[module.id],
-  })) ?? [], [patch?.modules, selected, measurements])
-
-  const edges = useMemo(() => {
-    if (!patch) return []
-    const wires = reconnecting ? [...patch.wires, reconnecting] : patch.wires
-    return wires.map(wire => ({
-      ...wire, type: 'cable' as const,
-      data: { signal: signalAt(patch.modules.find(node => node.id === wire.source), 'out', wire.sourceHandle) ?? 'audio' },
-      selected: selectedEdges.has(wire.id),
-      style: reconnecting?.id === wire.id ? { opacity: 0, pointerEvents: 'none' as const } : undefined,
-    }))
-  }, [patch?.wires, patch?.modules, reconnecting, selectedEdges])
-
   useEffect(() => {
-    setSelected(new Set())
-    setSelectedEdges(new Set())
     setWindowOrder([])
   }, [project?.id])
 
@@ -90,11 +53,6 @@ export function RackPage() {
     setDialog(undefined)
   }
 
-  function fit() {
-    if (nodes.length) void flow.fitView({ duration: 180, padding: 0.18 })
-    else void flow.setViewport({ x: 0, y: 0, zoom: 1 })
-  }
-
   function copy(ids: Set<string>) {
     rack.duplicateModules(ids)
     setContext(undefined)
@@ -106,85 +64,15 @@ export function RackPage() {
   }
 
   useEffect(() => {
-    function keydown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setMenu(undefined)
-        setDialog(undefined)
-        setContext(undefined)
-        return
-      }
-      const target = event.target instanceof HTMLElement ? event.target : undefined
-      if (dialog || rack.busy || target?.closest('input, select, textarea, [contenteditable]')) return
-      if (event.code === 'Space' && !target?.closest('button')) {
-        setPanning(true)
-        event.preventDefault()
-      }
-      const modifier = event.ctrlKey || event.metaKey
-      if (modifier && ['KeyZ', 'KeyD', 'Digit0'].includes(event.code)) {
-        event.preventDefault()
-        if (reconnecting) return
-        if (event.code === 'KeyZ') rack.step(event.shiftKey ? 'redo' : 'undo')
-        if (event.code === 'KeyD') copy(selected)
-        if (event.code === 'Digit0') fit()
-      }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !reconnecting && (selected.size || selectedEdges.size)) {
-        event.preventDefault()
-        erase(selected, selectedEdges)
-      }
+    function dismiss(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setMenu(undefined)
+      setDialog(undefined)
+      setContext(undefined)
     }
-    const release = (event: KeyboardEvent) => { if (event.code === 'Space') setPanning(false) }
-    const blur = () => setPanning(false)
-    window.addEventListener('keydown', keydown)
-    window.addEventListener('keyup', release)
-    window.addEventListener('blur', blur)
-    return () => {
-      window.removeEventListener('keydown', keydown)
-      window.removeEventListener('keyup', release)
-      window.removeEventListener('blur', blur)
-    }
-  })
-
-  function changeNodes(changes: NodeChange<RackNode>[]) {
-    const dimensions = changes.flatMap(change => change.type === 'dimensions' && change.dimensions
-      ? [[change.id, change.dimensions] as const] : [])
-    if (dimensions.length) setMeasurements(previous => {
-      const updated = dimensions.filter(([id, size]) => previous[id]?.width !== size.width || previous[id]?.height !== size.height)
-      return updated.length ? { ...previous, ...Object.fromEntries(updated) } : previous
-    })
-    const selection = changes.filter(change => change.type === 'select')
-    if (selection.length) setSelected(previous => {
-      const ids = new Set(previous)
-      for (const change of selection) {
-        if (change.selected) ids.add(change.id)
-        else ids.delete(change.id)
-      }
-      return ids
-    })
-    const positions = new Map(changes.flatMap(change => change.type === 'position' && change.position ? [[change.id, change.position] as const] : []))
-    rack.moveModules(positions)
-  }
-
-  function valid(connection: Connection | RackEdge) {
-    return Boolean(connection.sourceHandle && connection.targetHandle && rack.canAttach({
-      source: connection.source, target: connection.target, sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle,
-    }))
-  }
-
-  function attach(connection: Connection, record = true) {
-    if (!connection.sourceHandle || !connection.targetHandle) return
-    const wire = { ...connection, sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle }
-    rack.attach(wire, record)
-  }
-
-  function add(kind: Kind) {
-    if (!canvas.current) return
-    const rect = canvas.current.getBoundingClientRect()
-    const point = flow.screenToFlowPosition({ x: rect.left + rect.width * 0.42 - 80, y: rect.top + rect.height * 0.42 - 40 })
-    const id = rack.addModule(kind, point)
-    setSelected(new Set([id]))
-    setSelectedEdges(new Set())
-    setMenu(undefined)
-  }
+    window.addEventListener('keydown', dismiss)
+    return () => window.removeEventListener('keydown', dismiss)
+  }, [])
 
   function focus(id: string) {
     setWindowOrder(order => [...order.filter(item => item !== id), id])
@@ -193,7 +81,8 @@ export function RackPage() {
   function openWindow(id: string) {
     const existing = patch?.windows[id]
     const offset = (Object.keys(patch?.windows ?? {}).length % 7) * 26
-    const height = patch?.modules.find(node => node.id === id)?.kind === 'osc' ? 430 : 336
+    const kind = patch?.modules.find(node => node.id === id)?.kind
+    const height = (kind && modules[kind].windowHeight) || 336
     rack.changeWindow(id, existing ? { ...existing, minimized: false } : {
       x: window.innerWidth - 408 - offset, y: window.innerHeight * 0.43 + offset, width: 382, height, minimized: false,
     })
@@ -247,71 +136,16 @@ export function RackPage() {
         <button className={menu === 'history' ? 'current' : ''} onClick={() => toggle('history')} aria-expanded={menu === 'history'}>История версий</button>
       </header>
 
-      <div className="canvas" ref={canvas}>
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-          viewport={patch.viewport} onViewportChange={rack.changeViewport}
-          onNodesChange={changeNodes} onEdgesChange={changes => {
-            const changesToSelection = changes.filter(change => change.type === 'select')
-            if (changesToSelection.length) setSelectedEdges(previous => {
-              const ids = new Set(previous)
-              for (const change of changesToSelection) {
-                if (change.selected) ids.add(change.id)
-                else ids.delete(change.id)
-              }
-              return ids
-            })
-          }}
-          onPaneClick={() => { setMenu(undefined); setContext(undefined) }}
-          onNodeDoubleClick={(_, node) => openWindow(node.id)}
-          onNodeContextMenu={(event, node) => {
-            event.preventDefault()
-            setMenu(undefined)
-            setContext({ id: node.id, x: Math.min(event.clientX, innerWidth - 184), y: Math.min(event.clientY, innerHeight - 145) })
-          }}
-          onNodeDragStart={rack.begin} onNodeDragStop={rack.end}
-          onSelectionDragStart={rack.begin} onSelectionDragStop={rack.end}
-          onConnect={connection => attach(connection)} isValidConnection={valid}
-          onReconnectStart={(_, edge) => {
-            const wire = patch.wires.find(item => item.id === edge.id)
-            if (!wire) return
-            rack.begin()
-            setReconnecting(wire)
-            rack.detach(edge.id)
-          }}
-          onReconnect={(_, connection) => attach(connection, false)}
-          onReconnectEnd={() => { setReconnecting(undefined); rack.end() }}
-          nodesConnectable={!rack.busy} selectionOnDrag={!panning} selectionMode={SelectionMode.Partial} selectionKeyCode={null}
-          multiSelectionKeyCode="Shift" panOnDrag={panning ? [0, 1] : [1]} panActivationKeyCode={null}
-          zoomOnDoubleClick={false} deleteKeyCode={null} minZoom={0.1} maxZoom={2}
-          connectionLineType={ConnectionLineType.Step}
-        >
-          <Background variant={BackgroundVariant.Lines} gap={24} color="#26364b" lineWidth={0.75} />
-        </ReactFlow>
-
-        <div className="canvas-tools">
-          <button className="add primary" aria-label="Добавить узел" aria-expanded={menu === 'catalog'} onClick={() => toggle('catalog')}>+</button>
-          <div className="tool-group">
-            <button aria-label="Отменить" title="Ctrl+Z" disabled={!rack.canUndo || Boolean(reconnecting)} onClick={() => rack.step('undo')}>↶</button>
-            <button aria-label="Повторить" title="Ctrl+Shift+Z" disabled={!rack.canRedo || Boolean(reconnecting)} onClick={() => rack.step('redo')}>↷</button>
-          </div>
-          {menu === 'catalog' && <div className="popover catalog">
+      <RackCanvas patch={patch} projectId={project.id} commands={rack} shortcutsBlocked={Boolean(dialog)}
+        catalogOpen={menu === 'catalog'} toggleCatalog={() => toggle('catalog')}
+        openModule={openWindow} onPaneClick={() => { setMenu(undefined); setContext(undefined) }}
+        onContextMenu={(id, x, y, selection) => { setMenu(undefined); setContext({ id, x, y, selection }) }}
+        onEdit={() => setContext(undefined)} onAdd={() => setMenu(undefined)}
+        renderCatalog={add => menu === 'catalog' && <div className="popover catalog">
             {catalog.map(group => <section key={group.title}><h2>{group.title}</h2>
               {group.kinds.map(kind => <button key={kind} onClick={() => add(kind)}>{modules[kind].title}</button>)}
             </section>)}
-          </div>}
-        </div>
-        {patch.modules.length === 0 && <div className="empty">
-          <div className="empty-icon" aria-hidden="true">∿</div>
-          <h2>Соберите первый патч</h2>
-          <p>Добавьте Oscillator и Output, затем соедините их порты.</p>
-          <button className="primary" onClick={() => toggle('catalog')}>Добавить узел</button>
-        </div>}
-        <div className="zoom tool-group">
-          <button aria-label="Уменьшить" onClick={() => flow.zoomOut({ duration: 120 })}>−</button>
-          <button className="zoom-value" title="Вся схема · Ctrl+0" aria-label="Показать всю схему" onClick={fit}>{Math.round(patch.viewport.zoom * 100)}%</button>
-          <button aria-label="Увеличить" onClick={() => flow.zoomIn({ duration: 120 })}>+</button>
-        </div>
-      </div>
+          </div>} />
 
       <footer>Shift + клик — выделение <span>·</span> Пробел + перетаскивание — панорамирование <span>·</span> Двойной клик — параметры</footer>
 
@@ -321,7 +155,7 @@ export function RackPage() {
         return <FloatingWindow key={project.id + node.id} title={modules[node.kind].title + ' · параметры'} win={win}
           z={20 + Math.max(0, windowOrder.indexOf(node.id))} focus={() => focus(node.id)} close={() => rack.changeWindow(node.id)}
           change={next => rack.changeWindow(node.id, next)}>
-          <WidgetControls node={node} engine={engine} begin={rack.begin} end={rack.end}
+          <AudioModuleControls node={node} engine={engine} begin={rack.begin} end={rack.end}
             setParam={(key, value, transient) => rack.setParam(node.id, key, value, transient)}
             changeOscillators={(change, transient) => rack.changeOscillators(node.id, change, transient)}
             grow={() => rack.growModule(node.id)} />
@@ -349,8 +183,8 @@ export function RackPage() {
 
       {context && <div className="popover context-menu" style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()}>
         <button onClick={() => { openWindow(context.id); setContext(undefined) }}>Параметры</button>
-        <button onClick={() => copy(selected.has(context.id) ? selected : new Set([context.id]))}>Дублировать</button>
-        <button className="danger" onClick={() => erase(selected.has(context.id) ? selected : new Set([context.id]))}>Удалить</button>
+        <button onClick={() => copy(context.selection)}>Дублировать</button>
+        <button className="danger" onClick={() => erase(context.selection)}>Удалить</button>
       </div>}
       {(rack.error || audioError || rack.status === 'error') && <div className="notice" role="alert">
         <span>{rack.error || audioError || 'Изменения не сохранены. Выгрузите проект в JSON.'}</span>

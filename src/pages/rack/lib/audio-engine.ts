@@ -1,22 +1,14 @@
-import { noteFrequency, numeric, oscillatorLayers, ports, signalAt, type Module, type Patch, type Wire } from '../../../entities/project/index.ts'
+import {
+  acceptsMidi, changedMidiInput, createModuleRuntime, numeric, ports, usesMidiDevice, type Module, type ModuleRuntime,
+} from '../../../entities/audio-module/index.ts'
+import { signalAt, type Patch, type Wire } from '../../../entities/project/index.ts'
 
-type SinkElement = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-type Voice = { note: number; channel: number; oscillator: OscillatorNode; level: GainNode; start: number; attack: number; peak: number; released: boolean }
-type Generator = { oscillator: OscillatorNode; level: GainNode }
 type Runtime = {
   inputs: Map<string, GainNode>
   outputs: Map<string, GainNode>
   bus: GainNode
-  oscillators?: Map<string, Generator>
-  voices: Set<Voice>
-  defaultRoute?: GainNode
-  stream?: MediaStreamAudioDestinationNode
-  element?: SinkElement
-  device?: string
-  request?: object
+  module: ModuleRuntime
 }
-
-export const supportsOutputSelection = () => 'setSinkId' in HTMLMediaElement.prototype
 
 export class AudioEngine {
   private context?: AudioContext
@@ -55,7 +47,7 @@ export class AudioEngine {
     this.midi.onstatechange = event => {
       if (event.port?.state === 'disconnected') {
         for (const node of this.patch?.modules ?? []) {
-          if (node.kind === 'midi' && node.params.device === event.port.id) this.releaseDestinations(node.id)
+          if (usesMidiDevice(node, event.port.id)) this.releaseDestinations(node.id)
         }
       }
       this.bindMidi()
@@ -77,26 +69,25 @@ export class AudioEngine {
 
   private makeRuntime(node: Module): Runtime {
     const ctx = this.context!
-    const runtime: Runtime = { inputs: new Map(), outputs: new Map(), bus: ctx.createGain(), voices: new Set() }
-    runtime.bus.gain.value = node.kind === 'osc' ? 1 : numeric(node, 'gain')
-    if (node.kind === 'osc') runtime.oscillators = new Map()
-    if (node.kind === 'out') {
-      runtime.defaultRoute = ctx.createGain()
-      runtime.bus.connect(runtime.defaultRoute)
-      runtime.defaultRoute.connect(this.master!)
-    }
-    return runtime
+    const bus = ctx.createGain()
+    const module = createModuleRuntime(node.kind, {
+      context: ctx,
+      master: this.master!,
+      ramp: (param, value) => this.ramp(param, value),
+      setWarning: message => {
+        if (message) this.warnings.set(node.id, message)
+        else this.warnings.delete(node.id)
+      },
+      hasWarning: () => this.warnings.has(node.id),
+      changed: this.changed,
+    }, bus)
+    bus.gain.value = module.fixedBusGain ?? numeric(node, 'gain')
+    return { inputs: new Map(), outputs: new Map(), bus, module }
   }
 
   private apply(node: Module, runtime: Runtime) {
     const ctx = this.context!
-    if (runtime.oscillators) this.applyOscillators(node, runtime, runtime.oscillators)
-    else this.ramp(runtime.bus.gain, numeric(node, 'gain'))
-    if (node.kind === 'synth') {
-      const held = [...runtime.voices].filter(voice => !voice.released)
-      for (const voice of held.slice(0, Math.max(0, held.length - numeric(node, 'voices')))) this.release(voice, 0.025)
-    }
-
+    if (runtime.module.fixedBusGain === undefined) this.ramp(runtime.bus.gain, numeric(node, 'gain'))
     for (const side of ['in', 'out'] as const) {
       const terminals = side === 'in' ? runtime.inputs : runtime.outputs
       const audioPorts = ports(node, side).filter(port => port.signal === 'audio')
@@ -118,90 +109,7 @@ export class AudioEngine {
         } else this.ramp(terminal.gain, gain)
       }
     }
-
-    if (node.kind === 'out' && runtime.device !== node.params.device) this.routeOutput(node, runtime)
-  }
-
-  private applyOscillators(node: Module, runtime: Runtime, generators: Map<string, Generator>) {
-    const ctx = this.context!
-    const active = oscillatorLayers(node).filter(layer => layer.enabled)
-    const ids = new Set(active.map(layer => layer.id))
-    for (const [id, generator] of generators) {
-      if (ids.has(id)) continue
-      this.ramp(generator.level.gain, 0)
-      generator.oscillator.stop(ctx.currentTime + 0.05)
-      generators.delete(id)
-    }
-
-    const frequency = numeric(node, 'frequency')
-    for (const layer of active) {
-      let generator = generators.get(layer.id)
-      if (!generator) {
-        const oscillator = ctx.createOscillator()
-        const level = ctx.createGain()
-        oscillator.frequency.value = frequency
-        oscillator.type = layer.wave
-        level.gain.value = 0
-        oscillator.connect(level)
-        level.connect(runtime.bus)
-        oscillator.onended = () => {
-          oscillator.disconnect()
-          level.disconnect()
-        }
-        oscillator.start()
-        generator = { oscillator, level }
-        generators.set(layer.id, generator)
-      }
-      generator.oscillator.type = layer.wave
-      this.ramp(generator.oscillator.frequency, frequency)
-      this.ramp(generator.level.gain, layer.gain)
-    }
-  }
-
-  private routeOutput(node: Module, runtime: Runtime) {
-    const device = String(node.params.device)
-    runtime.device = device
-    const request = {}
-    runtime.request = request
-    this.ramp(runtime.defaultRoute!.gain, 1)
-    this.disposeOutput(runtime)
-    this.warnings.delete(node.id)
-    if (!device) return
-    if (!supportsOutputSelection()) {
-      this.warnings.set(node.id, 'Выбор устройства вывода недоступен')
-      return
-    }
-    const ctx = this.context!
-    runtime.stream = ctx.createMediaStreamDestination()
-    runtime.bus.connect(runtime.stream)
-    const element: SinkElement = new Audio()
-    runtime.element = element
-    element.srcObject = runtime.stream.stream
-    void element.setSinkId!(device).then(async () => {
-      if (runtime.request !== request) return
-      await element.play()
-      if (runtime.request !== request) return
-      this.ramp(runtime.defaultRoute!.gain, 0)
-      this.changed()
-    }).catch(() => {
-      if (runtime.request !== request) return
-      this.disposeOutput(runtime)
-      this.warnings.set(node.id, 'Устройство недоступно. Используется системный выход.')
-      this.changed()
-    })
-  }
-
-  private disposeOutput(runtime: Runtime) {
-    if (runtime.element) {
-      runtime.element.pause()
-      runtime.element.srcObject = null
-      runtime.element = undefined
-    }
-    if (runtime.stream) {
-      runtime.bus.disconnect(runtime.stream)
-      runtime.stream.stream.getTracks().forEach(track => track.stop())
-      runtime.stream = undefined
-    }
+    runtime.module.apply?.(node)
   }
 
   private refreshRoutes = async () => {
@@ -209,10 +117,7 @@ export class AudioEngine {
       const devices = await navigator.mediaDevices.enumerateDevices()
       const available = new Set(devices.filter(device => device.kind === 'audiooutput').map(device => device.deviceId))
       for (const node of this.patch?.modules ?? []) {
-        if (node.kind !== 'out' || !node.params.device) continue
-        const runtime = this.runtimes.get(node.id)
-        if (!runtime) continue
-        if (available.has(String(node.params.device)) === this.warnings.has(node.id)) this.routeOutput(node, runtime)
+        this.runtimes.get(node.id)?.module.refreshRoute?.(node, available)
       }
     } catch {
       // Keep the last route if the browser can't enumerate devices.
@@ -227,9 +132,9 @@ export class AudioEngine {
     if (previous) {
       for (const edge of previous.wires) {
         const source = previous.modules.find(node => node.id === edge.source)
-        if (source?.kind !== 'midi') continue
+        if (!source || signalAt(source, 'out', edge.sourceHandle) !== 'midi') continue
         const current = next.modules.find(node => node.id === edge.source)
-        if (!next.wires.some(wire => sameWire(wire, edge)) || current?.params.device !== source.params.device || current.params.channel !== source.params.channel) {
+        if (!next.wires.some(wire => sameWire(wire, edge)) || changedMidiInput(source, current)) {
           this.releaseAll(edge.target)
         }
       }
@@ -255,14 +160,11 @@ export class AudioEngine {
       if (nodes.has(id)) continue
       this.runtimes.delete(id)
       this.warnings.delete(id)
-      runtime.request = undefined
+      runtime.module.deactivate?.()
       this.ramp(runtime.bus.gain, 0)
       setTimeout(() => {
-        for (const generator of runtime.oscillators?.values() ?? []) generator.oscillator.stop()
-        for (const voice of runtime.voices) voice.oscillator.stop()
-        this.disposeOutput(runtime)
+        runtime.module.dispose?.()
         runtime.bus.disconnect()
-        runtime.defaultRoute?.disconnect()
         for (const input of runtime.inputs.values()) input.disconnect()
       }, 50)
     }
@@ -294,18 +196,7 @@ export class AudioEngine {
   }
 
   private releaseAll(id: string) {
-    for (const voice of this.runtimes.get(id)?.voices ?? []) this.release(voice, 0.04)
-  }
-
-  private release(voice: Voice, seconds: number) {
-    if (voice.released) return
-    const now = this.context!.currentTime
-    voice.released = true
-    const gain = voice.level.gain
-    gain.cancelScheduledValues(now)
-    gain.setValueAtTime(voice.peak * Math.min(1, Math.max(0, now - voice.start) / voice.attack), now)
-    gain.setTargetAtTime(0, now, seconds / 5)
-    voice.oscillator.stop(now + seconds + 0.015)
+    this.runtimes.get(id)?.module.releaseAll?.()
   }
 
   private handleMidi(device: string, bytes: Uint8Array | null) {
@@ -316,47 +207,16 @@ export class AudioEngine {
     if (command !== 0x80 && command !== 0x90 && !(command === 0xb0 && (note === 120 || note === 123))) return
 
     for (const input of this.patch.modules) {
-      if (input.kind !== 'midi' || input.params.device !== device || (input.params.channel !== 0 && input.params.channel !== channel)) continue
+      if (!acceptsMidi(input, device, channel)) continue
       for (const wire of this.patch.wires) {
         if (wire.source !== input.id) continue
         const synth = this.patch.modules.find(node => node.id === wire.target)
         const runtime = this.runtimes.get(wire.target)
-        if (!synth || !runtime) continue
-        if (command === 0xb0) {
-          for (const voice of runtime.voices) if (voice.channel === channel) this.release(voice, 0.04)
-        } else if (command === 0x90 && velocity > 0) {
-          this.noteOn(synth, runtime, note, channel, velocity)
-        } else {
-          const voice = [...runtime.voices].find(voice => !voice.released && voice.note === note && voice.channel === channel)
-          if (voice) this.release(voice, numeric(synth, 'release'))
-        }
+        if (synth) runtime?.module.onMidi?.(synth, { command, note, channel, velocity })
       }
     }
   }
 
-  private noteOn(node: Module, runtime: Runtime, note: number, channel: number, velocity: number) {
-    const held = [...runtime.voices].filter(voice => !voice.released)
-    if (held.length >= numeric(node, 'voices')) this.release(held[0], 0.025)
-    const ctx = this.context!
-    const now = ctx.currentTime
-    const oscillator = ctx.createOscillator()
-    const level = ctx.createGain()
-    oscillator.type = node.params.wave as OscillatorType
-    oscillator.frequency.value = noteFrequency(note)
-    oscillator.connect(level)
-    level.connect(runtime.bus)
-    const peak = velocity / 127 / Math.sqrt(numeric(node, 'voices'))
-    level.gain.setValueAtTime(0, now)
-    level.gain.linearRampToValueAtTime(peak, now + numeric(node, 'attack'))
-    const voice = { note, channel, oscillator, level, start: now, attack: numeric(node, 'attack'), peak, released: false }
-    runtime.voices.add(voice)
-    oscillator.onended = () => {
-      oscillator.disconnect()
-      level.disconnect()
-      runtime.voices.delete(voice)
-    }
-    oscillator.start(now)
-  }
 }
 
 const sameWire = (a: Wire, b: Wire) => a.id === b.id && a.source === b.source && a.target === b.target && a.sourceHandle === b.sourceHandle && a.targetHandle === b.targetHandle

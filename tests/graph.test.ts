@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { canConnect, connect, createProject, duplicate, emptyPatch, importProject, makeModule, oscillatorLayers, remove, serializeProject, setOscillatorLayers, type Module } from '../src/entities/project/index.ts'
+import { makeModule, oscillatorLayers, setOscillatorLayers, type Module } from '../src/entities/audio-module/model.ts'
+import { canConnect, connect, createProject, duplicate, emptyPatch, importProject, remove, serializeProject } from '../src/entities/project/index.ts'
 
 const node = (kind: Module['kind']) => makeModule(kind, { x: 0, y: 0 })
 const wire = (source: Module, target: Module, output = 0, input = 0) => ({

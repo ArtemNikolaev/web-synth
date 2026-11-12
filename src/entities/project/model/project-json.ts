@@ -1,4 +1,5 @@
-import { canConnect, kinds, modules, ranges, signalAt, uid, waves, type Kind, type Patch, type Project } from './patch.ts'
+import { gainRange, kinds, modules, parameterRange, waves, type Kind } from '../../audio-module/@x/project.ts'
+import { canConnect, signalAt, uid, type Patch, type Project } from './patch.ts'
 
 export function serializeProject(project: Project) {
   return JSON.stringify(project, null, 2)
@@ -26,19 +27,19 @@ function validPatch(value: unknown): value is Patch {
       for (const layer of node.oscillators) {
         if (!object(layer) || !identifier(layer.id) || layerIds.has(layer.id) ||
           !waves.includes(layer.wave as typeof waves[number]) || !finite(layer.gain) ||
-          layer.gain < ranges.gain[0] || layer.gain > ranges.gain[1] || typeof layer.enabled !== 'boolean') return false
+          layer.gain < gainRange[0] || layer.gain > gainRange[1] || typeof layer.enabled !== 'boolean') return false
         layerIds.add(layer.id)
       }
     }
     const kind = node.kind as Kind
-    const defaults = modules[kind].params
+    const { params: defaults, dynamicPorts } = modules[kind]
     if (Object.keys(defaults).some(key => !Object.hasOwn(node.params as object, key))) return false
     for (const [key, param] of Object.entries(node.params)) {
-      if (key === 'device' && (kind === 'out' || kind === 'midi') && typeof param === 'string') continue
-      if (key === 'wave' && (kind === 'osc' || kind === 'synth') && waves.includes(param as typeof waves[number])) continue
-      const dynamic = (kind === 'mix' && /^in-\d+$/.test(key)) || (kind === 'split' && /^out-\d+$/.test(key))
+      if (key === 'device' && Object.hasOwn(defaults, 'device') && typeof param === 'string') continue
+      if (key === 'wave' && Object.hasOwn(defaults, 'wave') && waves.includes(param as typeof waves[number])) continue
+      const dynamic = dynamicPorts && key.startsWith(dynamicPorts + '-') && /^\d+$/.test(key.slice(dynamicPorts.length + 1))
       if (dynamic && Number(key.split('-')[1]) >= node.count) return false
-      const range = dynamic ? ranges.gain : Object.hasOwn(defaults, key) && ranges[key]
+      const range = dynamic ? gainRange : Object.hasOwn(defaults, key) && parameterRange(kind, key)
       if (!range || !finite(param) || param < range[0] || param > range[1] || (range[2] === 1 && !Number.isInteger(param))) return false
     }
   }

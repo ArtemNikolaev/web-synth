@@ -1,29 +1,7 @@
-export const kinds = ['osc', 'midi', 'synth', 'mix', 'split', 'out'] as const
-export type Kind = typeof kinds[number]
-export type Signal = 'audio' | 'midi'
-export type Point = { x: number; y: number }
-export type WindowState = Point & { width: number; height: number; minimized: boolean }
-export const waves = ['sine', 'square', 'sawtooth', 'triangle'] as const
-export type OscillatorLayer = { id: string; wave: typeof waves[number]; gain: number; enabled: boolean }
-export const noteFrequency = (note: number) => 440 * 2 ** ((note - 69) / 12)
-export const modules = {
-  osc: { title: 'Oscillator', inputs: [], outputs: ['audio'], params: { wave: 'sine', frequency: 110, gain: 0.18 } },
-  midi: { title: 'MIDI Input', inputs: [], outputs: ['midi'], params: { device: '', channel: 0 } },
-  synth: { title: 'MIDI Synth', inputs: ['midi'], outputs: ['audio'], params: { wave: 'triangle', voices: 5, attack: 0.015, release: 0.22, gain: 0.25 } },
-  mix: { title: 'Mixer', inputs: ['audio', 'audio'], outputs: ['audio'], params: { gain: 1 } },
-  split: { title: 'Splitter', inputs: ['audio'], outputs: ['audio', 'audio'], params: { gain: 1 } },
-  out: { title: 'Output', inputs: ['audio'], outputs: [], params: { gain: 0.8, device: '' } },
-} satisfies Record<Kind, { title: string; inputs: Signal[]; outputs: Signal[]; params: Record<string, string | number> }>
+import { makeModule, ports, type Module, type Point } from '../../audio-module/@x/project.ts'
 
-export type Module = {
-  id: string
-  kind: Kind
-  position: Point
-  count: number
-  params: Record<string, string | number>
-  oscillators?: OscillatorLayer[]
-  auto?: true
-}
+export type WindowState = Point & { width: number; height: number; minimized: boolean }
+
 export type Wire = { id: string; source: string; sourceHandle: string; target: string; targetHandle: string }
 export type Patch = {
   modules: Module[]
@@ -37,31 +15,6 @@ export type Project = { schemaVersion: 1; id: string; name: string; patch: Patch
 export const uid = () => crypto.randomUUID()
 export const emptyPatch = (): Patch => ({ modules: [], wires: [], viewport: { x: 0, y: 0, zoom: 1 }, windows: {} })
 export const createProject = (name: string): Project => ({ schemaVersion: 1, id: uid(), name, patch: emptyPatch(), versions: [] })
-export function makeModule(kind: Kind, position: Point): Module {
-  if (kind === 'osc') {
-    return {
-      id: uid(), kind, position, count: 2, params: { ...modules.osc.params },
-      oscillators: [{ id: 'main', wave: 'sine', gain: modules.osc.params.gain, enabled: true }],
-    }
-  }
-  return { id: uid(), kind, position, count: 2, params: { ...modules[kind].params } }
-}
-
-export function oscillatorLayers(node: Module): OscillatorLayer[] {
-  return node.oscillators ?? [{ id: 'main', wave: node.params.wave as OscillatorLayer['wave'], gain: Number(node.params.gain), enabled: true }]
-}
-
-export function setOscillatorLayers(node: Module, oscillators: OscillatorLayer[]): Module {
-  const { wave, gain } = oscillators[0]
-  return { ...node, params: { ...node.params, wave, gain }, oscillators }
-}
-
-export function ports(module: Module, side: 'in' | 'out') {
-  const dynamic = (module.kind === 'mix' && side === 'in') || (module.kind === 'split' && side === 'out')
-  const signals: Signal[] = dynamic ? Array<Signal>(module.count).fill('audio') : modules[module.kind][side === 'in' ? 'inputs' : 'outputs']
-  return signals.map((signal, index) => ({ signal, id: side + '-' + index, index }))
-}
-
 export function signalAt(module: Module | undefined, side: 'in' | 'out', handle: string) {
   return module && ports(module, side).find(port => port.id === handle)?.signal
 }
@@ -152,15 +105,4 @@ export function duplicate(patch: Patch, ids: Set<string>): Patch {
     ...wire, id: uid(), source: copies.get(wire.source)!.id, target: copies.get(wire.target)!.id,
   }))
   return { ...patch, modules: [...patch.modules, ...copies.values()], wires: [...patch.wires, ...wires] }
-}
-
-export const numeric = (node: Module, key: string, fallback = 1) => Number(node.params[key] ?? fallback)
-
-export const ranges: Record<string, [number, number, number]> = {
-  gain: [0, 2, 0.01],
-  frequency: [20, 12000, 0.01],
-  voices: [1, 32, 1],
-  attack: [0.001, 2, 0.001],
-  release: [0.01, 5, 0.01],
-  channel: [0, 16, 1],
 }

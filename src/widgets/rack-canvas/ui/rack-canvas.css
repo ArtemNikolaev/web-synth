@@ -1,0 +1,57 @@
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border: 1px solid #4d7da3;
+  border-radius: 8px;
+  color: #93d9ff;
+  background: #223e58;
+  font-size: 23px;
+  line-height: 1;
+}
+.canvas { position: relative; isolation: isolate; overflow: hidden; }
+.canvas-tools { position: absolute; top: 24px; left: 24px; display: flex; align-items: center; gap: 12px; z-index: 8; }
+button.add { width: 45px; height: 45px; padding: 0; font-size: 28px; font-weight: 500; line-height: 1; border-radius: 10px; }
+.tool-group { display: flex; background: #1d2b3c; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tool-group button { background: transparent; border: 0; border-radius: 0; min-width: 38px; min-height: 34px; }
+.tool-group button + button { border-left: 1px solid var(--border); }
+.zoom { position: absolute; left: 24px; bottom: 20px; }
+.zoom .zoom-value { min-width: 65px; font-variant-numeric: tabular-nums; }
+.empty { position: absolute; top: 44%; left: 50%; transform: translate(-50%, -50%); width: min(420px, 90%); text-align: center; pointer-events: none; }
+.empty-icon { margin: 0 auto 15px; width: 51px; height: 51px; font-size: 32px; border-radius: 12px; }
+.empty h2 { font-size: 23px; letter-spacing: -.03em; }
+.empty p { margin: 9px 0 18px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.empty button { pointer-events: auto; }
+
+.rack-node {
+  width: 176px;
+  padding: 15px 17px;
+  position: relative;
+  border: 1px solid #608bad;
+  border-radius: 9px;
+  background: #22364d;
+  box-shadow: 0 5px 15px #09101b59;
+}
+.rack-node strong { font-size: 14px; font-weight: 600; }
+.rack-node.selected { outline: 2px solid #99cfff; outline-offset: 3px; }
+.auto { color: #d7c4f6; font-size: 10px; padding: 2px 4px; margin-left: 7px; border: 1px solid #8270a3; border-radius: 4px; vertical-align: middle; }
+.node-summary { margin-top: 5px; color: #bfd0e2; font-size: 11px; }
+.react-flow .port { width: 13px; height: 13px; border: 2px solid #101a29; background: var(--audio); color: var(--audio); }
+.react-flow .port.midi { background: var(--midi); color: var(--midi); }
+.react-flow .port.dim { opacity: .35; }
+.react-flow .port.compatible { box-shadow: 0 0 0 2px currentColor; }
+.react-flow .port.valid, .react-flow .port:hover:not(.dim) { box-shadow: 0 0 0 3px currentColor; }
+.port-number { position: absolute; top: -2px; font-size: 10px; pointer-events: none; }
+.react-flow__handle-left .port-number { left: 15px; }
+.react-flow__handle-right .port-number { right: 15px; }
+.react-flow .react-flow__edge-path, .react-flow .react-flow__connection-path { stroke: var(--audio); stroke-width: 2.5; }
+.react-flow .react-flow__edge-path.midi { stroke: var(--midi); stroke-dasharray: 6 4; }
+.react-flow .react-flow__edge:hover .react-flow__edge-path, .react-flow .react-flow__edge.selected .react-flow__edge-path { stroke: #f2f7ff; stroke-width: 3.5; }
+.react-flow .react-flow__selection { background: #538ecd28; border: 1px solid #78b8fa; }
+.react-flow .react-flow__attribution { background: #1d2b3c; padding: 3px 7px; }
+.react-flow .react-flow__attribution a { color: var(--muted); }
+
+@media (max-width: 620px) {
+  .canvas-tools, .zoom { left: 12px; }
+}

@@ -1,6 +1,6 @@
 # Modular Audio Rack
 
-Правила архитектуры и расширения проекта описаны в [AGENTS.md](AGENTS.md), порядок добавления аудиомодулей — в [WIDGET_DEVELOPMENT.md](WIDGET_DEVELOPMENT.md).
+Код каждого аудиомодуля находится в своей папке в [entities/audio-module/modules](src/entities/audio-module/modules). Бесконечный холст находится в [widgets/rack-canvas](src/widgets/rack-canvas). Правила архитектуры описаны в [AGENTS.md](AGENTS.md), порядок добавления модулей — в [WIDGET_DEVELOPMENT.md](WIDGET_DEVELOPMENT.md).
 
 Браузерный аудиорэк на TypeScript, React Flow, Web Audio и Web MIDI. Для работы используйте настольный Chrome.
 

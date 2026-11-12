@@ -33,12 +33,15 @@ function checkImport(file, source, specifier) {
   if (!targetFile) return
   const target = location(targetFile)
   if (!target) return
+  const projectModuleContract = layers[source.rank] === 'entities' && source.segment === 'project' &&
+    layers[target.rank] === 'entities' && target.segment === 'audio-module' &&
+    target.rest.length === 2 && target.rest[0] === '@x' && target.rest[1] === 'project.ts'
   if (target.rank < 0) {
     report(file, `"${path}" points outside an FSD layer`)
   } else if (target.rank < source.rank) {
     report(file, `"${path}" imports a higher layer`)
   } else if (target.rank === source.rank && source.hasSlices && target.segment !== source.segment) {
-    report(file, `"${path}" imports a sibling slice`)
+    if (!projectModuleContract) report(file, `"${path}" imports a sibling slice`)
   } else if (target.rank > source.rank && (target.hasSlices || layers[target.rank] === 'shared') &&
     (target.rest.length !== 1 || target.rest[0] !== 'index.ts')) {
     report(file, `"${path}" bypasses the public index.ts`)

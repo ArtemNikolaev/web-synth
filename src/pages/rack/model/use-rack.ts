@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AudioEngine } from '../lib/audio-engine.ts'
 import {
-  canConnect, connect, createProject, duplicate, emptyPatch, importProject, makeModule,
-  oscillatorLayers, remove, setOscillatorLayers, uid,
-  type Kind, type Module, type OscillatorLayer, type Patch, type Point, type Project, type Version, type WindowState, type Wire,
+  makeModule, oscillatorLayers, setOscillatorLayers, type Kind, type Module, type OscillatorLayer, type Point,
+} from '../../../entities/audio-module/index.ts'
+import {
+  canConnect, connect, createProject, duplicate, emptyPatch, importProject, remove, uid,
+  type Patch, type Project, type Version, type WindowState, type Wire,
 } from '../../../entities/project/index.ts'
 import { loadLibrary, saveLibrary } from '../api/project-library.ts'
 
