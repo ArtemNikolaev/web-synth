@@ -66,7 +66,7 @@ h1, h2, p { margin: 0; }
 .save-status i { width: 7px; height: 7px; border-radius: 50%; background: #82d4af; }
 .save-status.saving i { background: #e0b576; }
 .save-status.error i { background: #f1989a; }
-.audio-active:disabled { color: #a8e2c6; opacity: 1; border-color: #406859; background: #233e3b; }
+.audio-active { color: #a8e2c6; border-color: #406859; background: #233e3b; }
 .project-control { position: relative; }
 .project-button { display: flex; align-items: center; gap: 8px; max-width: min(230px, 28vw); }
 .project-button span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

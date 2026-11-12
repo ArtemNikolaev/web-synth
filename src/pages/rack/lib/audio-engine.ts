@@ -40,6 +40,13 @@ export class AudioEngine {
     this.changed()
   }
 
+  async stop() {
+    if (!this.context) return
+    await this.context.suspend()
+    for (const runtime of this.runtimes.values()) runtime.module.releaseAll?.()
+    this.changed()
+  }
+
   async enableMidi() {
     if (this.midi) return
     if (!navigator.requestMIDIAccess) throw new Error('Web MIDI недоступен. Откройте приложение через localhost или HTTPS.')

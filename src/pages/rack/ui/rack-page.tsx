@@ -24,13 +24,23 @@ export function RackPage() {
   const [context, setContext] = useState<{ id: string; x: number; y: number; selection: Set<string> }>()
   const [windowOrder, setWindowOrder] = useState<string[]>([])
   const [audioError, setAudioError] = useState('')
+  const [audioPending, setAudioPending] = useState(false)
   useEffect(() => {
     setWindowOrder([])
   }, [project?.id])
 
-  function startAudio() {
+  async function toggleAudio() {
+    const wasActive = engine.active
+    setAudioPending(true)
     setAudioError('')
-    void engine.start().catch(() => setAudioError('Не удалось включить аудио. Попробуйте ещё раз.'))
+    try {
+      if (wasActive) await engine.stop()
+      else await engine.start()
+    } catch {
+      setAudioError(wasActive ? 'Не удалось выключить звук. Попробуйте ещё раз.' : 'Не удалось включить звук. Попробуйте ещё раз.')
+    } finally {
+      setAudioPending(false)
+    }
   }
 
   function toggle(next: typeof menu) {
@@ -128,7 +138,9 @@ export function RackPage() {
         }} />
         <div className="toolbar-spacer" />
         <span className={'save-status ' + rack.status} role="status"><i />{statuses[rack.status]}</span>
-        <button className={engine.active ? 'audio-active' : 'primary'} onClick={startAudio} disabled={engine.active}>{engine.active ? 'Звук включён' : 'Включить звук'}</button>
+        <button className={engine.active ? 'audio-active' : 'primary'} onClick={toggleAudio} disabled={audioPending}>
+          {engine.active ? 'Выключить звук' : 'Включить звук'}
+        </button>
         <button onClick={() => ask({
           title: 'Сохранить версию', label: 'Сохранить версию', value: '',
           submit: rack.saveVersion,
